@@ -1,202 +1,113 @@
-# DEVELOPMENT.md
+# DEVELOPMENT
+
+Purpose
+
+The Boston Core MCP project provides Model Context Protocol (MCP) servers that let large language models (LLMs) and agentic tools safely explore and query Boston’s open data portal. The primary server in this repository makes read‑only requests to Boston’s CKAN instance at https://data.boston.gov and returns helpful, structured results that are easy for AI systems to use responsibly.
+
+What is MCP (in plain language)
+
+- MCP is a simple way for tools (like Claude Desktop) to talk to “servers” that provide capabilities.
+- An MCP server describes the tools it offers (for example, “search datasets” or “query a table”) and the shape of inputs/outputs.
+- Clients (like an AI assistant) can call those tools safely and predictably. Communication typically happens over stdio (the server is launched as a subprocess and talks via standard input/output).
+
+What this server does
+
+- Focus: Safe, read‑only access to Boston’s CKAN portal. No data is modified.
+- Tooling surface (plain language):
+  - search_datasets: Find datasets by keyword (e.g., “311”, “permits”, “snow”).
+  - list_all_datasets: Browse dataset IDs when you’re not sure what to search for.
+  - get_dataset_info: See detailed metadata for a dataset and its resources.
+  - get_datastore_schema: Inspect fields and data types for a given resource.
+  - query_datastore: Retrieve tabular records from a CKAN “DataStore active” resource, with optional filters, search, sorting, and pagination.
+- Safety defaults:
+  - Read‑only by design.
+  - Record limit cap (MAX_RECORDS) to prevent large, accidental pulls.
+  - Request timeouts to avoid long‑running or stuck requests.
+
+How it works (conceptual flow)
+
+1) A client (for example, Claude Desktop) starts the MCP server.
+2) The client asks the server “What tools do you offer?” and receives the tool list plus their input shapes.
+3) The client calls a tool with specific inputs (like a dataset ID or a resource ID).
+4) The server makes an HTTP call to CKAN’s API endpoints at https://data.boston.gov/api/3/action (as configured).
+5) The server formats and returns results to the client, staying within safety limits (record caps, timeouts).
+6) The client displays the results to the user or uses them to perform follow‑up actions.
+
+Key design choices (mapped to files)
+
+- servers/boston_opendata/server.py: Defines the MCP application and the tool catalog (what’s available and how each tool’s inputs/outputs are shaped). This is where user‑facing capabilities are described for the client.
+- servers/boston_opendata/main.py: Starts the MCP server using stdio. This is the “entry point” that clients launch.
+- servers/boston_opendata/config.py: Centralizes important runtime settings:
+  - CKAN_BASE_URL: Where requests are sent (Boston’s CKAN API).
+  - API_TIMEOUT: How long to wait for CKAN before giving up.
+  - MAX_RECORDS: Upper bound on records returned to keep interactions fast and safe.
+- servers/boston_opendata/ckan.py: Handles CKAN HTTP requests (how we talk to the portal).
+- servers/boston_opendata/formatters.py: Shapes responses so they are useful and readable for LLMs.
+
+Why the server is structured this way
+
+- Clarity for AI clients: Tools are narrowly scoped and well‑named, so an assistant can “decide” what to call.
+- Safety: Hard limits and timeouts guard against runaway queries and oversized responses.
+- Reliability: Separating configuration, network access, tool definitions, and presentation keeps failures localized and easier to debug.
+- Extensibility: New tools can be added alongside existing ones without disrupting clients.
+
+Benefits for different audiences
+
+- City staff and the public:
+  - Faster discovery of relevant datasets without manually browsing the portal.
+  - Natural‑language querying of tabular data for exploration and triage.
+- Developers and data practitioners:
+  - A consistent, machine‑readable tool interface for the CKAN API.
+  - Predictable outputs and guardrails for embedding into agents and workflows.
+- AI/agent platforms:
+  - A well‑documented, minimal‑dependency server with clear contracts.
+  - Read‑only, capped responses reduce the risk of runaway costs or timeouts.
+
+Development process (high‑level)
+
+1) Identify user goals and constraints
+   - Use cases: find datasets, inspect schemas, and query records.
+   - Constraints: read‑only, capped result sizes, reasonable timeouts.
+
+2) Design the tool surface
+   - Choose intuitive tool names and input shapes.
+   - Define limits (like MAX_RECORDS) and sensible defaults (like pagination).
+
+3) Implement against CKAN
+   - Use a small HTTP client to call CKAN endpoints consistently.
+   - Centralize configuration (base URL, timeout) for maintainability.
+
+4) Add formatting and helpful summaries
+   - Present outputs with enough context to be useful (dataset summaries, field names, types).
+   - Keep results concise so they are easy to read and safe to pass to LLMs.
+
+5) Integrate with MCP stdio
+   - Expose the tools to MCP clients via the stdio entry point.
+   - Ensure the server identifies itself and lists capabilities clearly on startup.
+
+6) Validate with real workflows
+   - Verify tool behavior in a client like Claude Desktop.
+   - Iterate on descriptions and result formatting to improve usefulness.
+
+7) Document and version
+   - Keep a clear Quickstart and README.
+   - Note interface changes (new tools, parameters, or limits).
+
+Core concepts and terminology
+
+- Dataset: A collection in CKAN that may contain one or more resources.
+- Resource: An individual file or table within a dataset; tabular resources can be “DataStore active.”
+- DataStore active: CKAN’s tabular store that supports schema introspection and queries.
+- Filters: Exact match constraints on fields (e.g., { "neighborhood": "South End" }).
+- Pagination: limit and offset control how many rows you get and from where to continue.
 
-Overview
+Roadmap ideas
 
-This document explains, in plain language for beginners, how the MCP server in this repository was developed and how to run it locally. It includes a concrete example showing how to connect the running MCP server to Claude Desktop.
+- Add caching for common requests to improve responsiveness.
+- Provide richer result previews (column sampling, basic stats).
+- Offer cross‑dataset helpers (e.g., “find datasets with compatible schemas”).
+- Optional usage logging with privacy safeguards for operational insight.
 
-If you are new to programming, follow the steps in order. If something is unclear, ask and I'll clarify.
+Integration in one sentence (for orientation)
 
-1) What this repository contains
-
-- A server ("MCP server") that provides the core backend for the project. The exact language or framework may vary; this document tells you how to detect and run it.
-- Source code, configuration files, and tests.
-
-2) Before you start (prerequisites)
-
-You will need:
-- Git installed (to clone the repo). Check with: git --version
-- One or more runtime/tooling depending on the project language. To figure out which, look for one of these files in the repository root:
-  - package.json  => Node.js / JavaScript / TypeScript
-  - requirements.txt or pyproject.toml => Python
-  - pom.xml or build.gradle => Java
-  - Cargo.toml => Rust
-  - Makefile => helpful targets may be provided
-
-Install the corresponding runtime:
-- Node.js (recommend LTS) and npm/yarn: https://nodejs.org/
-- Python 3.8+: https://python.org/
-- Java 11+ for Maven/Gradle projects: https://adoptopenjdk.net/
-- Rust: https://rustup.rs/
-
-Also helpful:
-- A code editor (VS Code recommended): https://code.visualstudio.com/
-- ngrok (optional) to expose your local server to the internet for external tools like Claude Desktop: https://ngrok.com/
-
-3) Clone the repository
-
-Open a terminal and run:
-
-  git clone https://github.com/thealphacubicle/boston-core-mcp.git
-  cd boston-core-mcp
-
-4) Identify how to run the server
-
-Check repository root for the files listed above. Follow the appropriate section below based on what you find.
-
-A) If this is a Node.js project (package.json)
-
-- Install dependencies:
-
-  npm install
-  # or if the project uses yarn:
-  yarn install
-
-- Check package.json scripts for a start script. Common commands:
-
-  npm run start
-  npm run dev   # often for a developer server with hot reload
-
-B) If this is a Python project (requirements.txt or pyproject.toml)
-
-- Create and activate a virtual environment (recommended):
-
-  python3 -m venv venv
-  source venv/bin/activate   # macOS / Linux
-  venv\Scripts\activate    # Windows PowerShell
-
-- Install dependencies:
-
-  pip install -r requirements.txt
-  # or if pyproject with poetry:
-  poetry install
-
-- Run the server using the documented command (often something like):
-
-  python -m app
-  # or
-  gunicorn app:app --reload
-
-C) If this is a Java project (pom.xml or build.gradle)
-
-- For Maven:
-
-  mvn clean install
-  mvn spring-boot:run     # if it is a Spring Boot project
-
-- For Gradle:
-
-  ./gradlew build
-  ./gradlew bootRun
-
-D) Other languages
-
-- Follow the standard build/run steps for the language (use README or project files).
-
-5) Configuration (environment variables and ports)
-
-- Look for an .env.example, config/*.yml or config/*.json files. If there is no example, you can create an .env file in the project root.
-
-Example .env (create in repo root):
-
-  # Port the server listens on
-  PORT=8080
-
-  # Optional API key if the server uses authentication for external tools
-  API_KEY=some-secret-token
-
-- The server will usually read PORT and API_KEY. Adjust values if the server uses other names.
-
-6) Start the server locally
-
-- After installing dependencies and configuring env vars, run the start command from step 4 for your project type.
-- Wait for a log line that says the server is listening (example: "Server listening on http://localhost:8080").
-
-7) Test the server works locally
-
-- Open a browser and visit http://localhost:8080 (or the configured port).
-- Or use curl to check an endpoint (example):
-
-  curl -i http://localhost:8080/health
-
-- If you get a 200 or a JSON response, the server is running.
-
-8) Example: Connecting the MCP server to Claude Desktop
-
-This is a practical example showing one way to connect a local MCP server to Claude Desktop. Claude Desktop is an application that can call external servers or plugins. Exact UI labels can vary by version; treat the following as a clear, concrete example you can adapt.
-
-Goal: Make Claude Desktop send requests to your local MCP server.
-
-Option 1 — Local direct connection (if Claude Desktop can reach localhost)
-
-1. Start your server on a known port, e.g., 8080.
-2. In Claude Desktop, go to Settings (or Preferences) and find where you can add a custom API/Plugin/Server. If there is a "Custom Server" or "Add Plugin" button, choose it.
-3. For the server URL, enter: http://localhost:8080
-4. If the server requires an API key, add a header named Authorization with value Bearer <API_KEY> (replace <API_KEY> with the value you put in .env).
-5. Save settings and try the integration: trigger the plugin or request to the server. Check your server logs to see incoming requests.
-
-Notes:
-- Some desktop apps sandbox network access and may not allow calls to localhost. If Claude Desktop does not reach your local server using http://localhost, try Option 2 below.
-
-Option 2 — Use ngrok to expose your local server publicly
-
-If Claude Desktop runs in an environment that cannot access your machine's localhost, ngrok creates a public URL that tunnels to your local server.
-
-1. Install ngrok and sign up for an account (optional but recommended for stable subdomains).
-2. Run ngrok on your server port (example):
-
-  ngrok http 8080
-
-3. ngrok will give you a public URL, e.g. https://abcd-12-34-56.ngrok.io
-4. In Claude Desktop "Add Server" UI, use that ngrok URL as the base URL.
-5. Set headers (Authorization) if needed.
-6. Try sending requests; you should see requests appear in both Claude Desktop and the server logs.
-
-Security note: Exposing your local server to the internet can be risky. Use API keys or other protections and stop ngrok when testing is done.
-
-9) How the server was developed (high-level, plain language)
-
-- The server was built as a small backend that listens for HTTP requests and responds with data. Developers typically:
-  1. Pick a language and framework (Node.js + Express, Python + FastAPI/Flask, Java + Spring Boot, etc.).
-  2. Define routes/endpoints that accept requests and return responses.
-  3. Add authentication if needed (API keys or tokens).
-  4. Add configuration files so settings (like PORT and API_KEY) are not hard-coded.
-  5. Add logging so developers can see incoming requests and errors.
-  6. Write tests for important behaviors.
-
-- Look through the repository for code that defines the HTTP server (files named server.js, app.js, main.py, Application.java, etc.). Reading the top-level file often shows how the server starts and which port and config keys it reads.
-
-10) Troubleshooting tips
-
-- Port already in use: change PORT in .env or kill the process using the port (lsof -i :8080 or netstat).
-- 403/401 errors from Claude Desktop: make sure Authorization header matches the server's expected token.
-- CORS errors in a browser: enable CORS in the server or test with curl (servers must explicitly allow requests from other origins).
-- If Claude Desktop cannot reach localhost, use ngrok as shown above.
-
-11) Making small changes and testing
-
-- Edit code in your editor. Re-run the server or use auto-reload tools (nodemon for Node.js, uvicorn --reload for FastAPI).
-- Add console logs or print statements to help understand code flow.
-
-12) Contributing
-
-- Follow existing code style and patterns in the repository.
-- Add tests for new behavior.
-- Open a pull request with a clear title and description.
-
-13) Where to look in the code for key pieces (beginner guide)
-
-- Server entrypoint: search for files with names like server.js, index.js, app.js, main.py, Application.java.
-- Routes / endpoints: look for directories named routes, controllers, api, or files that export request handlers.
-- Configuration: look for .env.example, config/, or files that parse process.env (Node) or os.environ (Python).
-- Authentication: look for middleware functions or code that checks headers for an API key.
-
-14) Example .env.example to commit (copy this into .env for local testing)
-
-  PORT=8080
-  API_KEY=changeme
-
-15) Final notes
-
-- This document is intentionally general so it helps beginners work with this repo even if the project uses a different language. If you want, I can update this file with exact commands tailored to the language used in the repository (e.g., Node.js commands) if you tell me which files exist (package.json, requirements.txt, etc.) or let me read the repo.
-
-Thank you — if you want I can also add a short quick-start script or a Makefile to automate these steps.
+An MCP‑compatible client launches the stdio server, asks it what tools it offers, and then calls those tools to search and query Boston’s open data—always read‑only and within pre‑set limits.
