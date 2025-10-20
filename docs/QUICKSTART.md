@@ -1,67 +1,76 @@
-# QUICKSTART
+# Quickstart
 
-Audience
+This guide walks through installing and running the Boston Open Data MCP server locally, then connecting it to an MCP-compatible client such as Claude Desktop.
 
-This guide is for running the Boston Open Data MCP server locally and connecting it to an MCP client (for example, Claude Desktop). It is Python‑only and based on this repository’s files.
+## Audience
 
-Requirements
+Use this document if you are comfortable with a terminal and want to stand up the server for testing or integration work. All instructions assume Python 3.10 or newer.
 
-- Python 3.10+ recommended
-- pip
-- A terminal (macOS/Linux/Windows)
-- Optional: a code editor
+## Prerequisites
 
-Install dependencies
+- Python 3.10+
+- `pip`
+- A terminal on macOS, Linux, or Windows
+- (Optional) A code editor for inspecting the source
 
-1) Create and activate a virtual environment
+## 1. Create and Activate a Virtual Environment
 
-- macOS/Linux:
-  python3 -m venv .venv
-  source .venv/bin/activate
+macOS / Linux:
 
-- Windows (PowerShell):
-  py -m venv .venv
-  .\.venv\Scripts\Activate.ps1
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
 
-2) Install packages
+Windows (PowerShell):
 
-- From the repository root:
-  pip install -r requirements.txt
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
 
-The minimal dependencies for this server are:
-- httpx>=0.27
-- mcp>=1.2
+## 2. Install Dependencies
 
-Run the server (stdio)
+From the repository root, install the required packages:
 
-- From the repository root:
-  python -m servers.boston_opendata.main
+```bash
+pip install -r requirements.txt
+```
 
-What to expect
+The core dependencies are:
 
-- The server prints a startup message to stderr and then appears idle. That’s correct: it is waiting for an MCP client to connect over stdio.
+- `httpx>=0.27`
+- `mcp>=1.2`
 
-Repository structure (relevant files)
+## 3. Run the MCP Server (stdio)
 
-- servers/boston_opendata/main.py — entry point that starts the MCP server over stdio
-- servers/boston_opendata/server.py — defines the MCP app and tools (search, list, schema, query)
-- servers/boston_opendata/ckan.py — CKAN API calls
-- servers/boston_opendata/formatters.py — result shaping for LLMs
-- servers/boston_opendata/config.py — key settings (CKAN_BASE_URL, API_TIMEOUT, MAX_RECORDS)
-- requirements.txt — runtime dependencies
+Launch the Boston Open Data MCP server from the repository root:
 
-Connect to Claude Desktop (example)
+```bash
+python -m servers.boston_opendata.main
+```
 
-1) Locate your Claude Desktop config file and add an MCP server entry under mcpServers.
+Expected behavior:
 
-- macOS (typical):
-  ~/Library/Application Support/Claude/claude_desktop_config.json
+- The process prints a startup message to stderr.
+- The terminal appears idle afterward because the server is waiting for an MCP client connection over stdio.
 
-- Windows (typical):
-  %AppData%\Claude\claude_desktop_config.json
+## Repository Landmarks
 
-2) Add or merge this entry, updating cwd to your local repo path:
+- `servers/boston_opendata/main.py` – stdio entry point that launches the MCP server
+- `servers/boston_opendata/server.py` – MCP app and tool definitions
+- `servers/boston_opendata/ckan.py` – CKAN HTTP client helpers
+- `servers/boston_opendata/formatters.py` – response shaping utilities
+- `servers/boston_opendata/config.py` – CKAN base URL, timeouts, and safety limits
 
+## Connect to Claude Desktop (Example Client)
+
+1. Locate the Claude Desktop configuration file and add an MCP server entry under `mcpServers`.
+   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - Windows: `%AppData%\Claude\claude_desktop_config.json`
+2. Add (or merge) the following snippet, updating `cwd` to point to your local clone:
+
+```json
 {
   "mcpServers": {
     "boston-opendata": {
@@ -71,45 +80,33 @@ Connect to Claude Desktop (example)
     }
   }
 }
+```
 
-3) Restart Claude Desktop. In a new chat, ask: “List available tools.” You should see the Boston Open Data tools.
+3. Restart Claude Desktop and start a new conversation. Ask the assistant to "list available tools" to confirm the connection.
 
-Available tools (what you’ll see in clients)
+## Available Tools
 
-- search_datasets(query, limit=10)
-- list_all_datasets(limit=20)
-- get_dataset_info(dataset_id)
-- get_datastore_schema(resource_id)
-- query_datastore(resource_id, limit=10, offset=0, search_text, filters, sort, fields)
+- `search_datasets(query, limit=10)`
+- `list_all_datasets(limit=20)`
+- `get_dataset_info(dataset_id)`
+- `get_datastore_schema(resource_id)`
+- `query_datastore(resource_id, limit=10, offset=0, search_text, filters, sort, fields)`
 
-Notes and tips
+These tools are read-only and honor configuration limits defined in `config.py`.
 
-- Read‑only: This server does not write or modify CKAN data.
-- Limits: MAX_RECORDS in config.py caps results for safety (default 1000).
-- Timeouts: API_TIMEOUT in config.py (default 30s) keeps requests responsive.
-- DataStore only: query_datastore works for resources with “DataStore active.”
+## Troubleshooting
 
-Troubleshooting
+- **Missing packages (`ModuleNotFoundError`)** – Ensure your virtual environment is activated and rerun `pip install -r requirements.txt`.
+- **Claude Desktop does not list the tools** – Verify the configuration path, confirm that `cwd` points to the repository, and restart the application.
+- **Python version mismatch** – Check `python3 --version` (macOS/Linux) or `py -V` (Windows) to ensure Python 3.10+ is being used.
+- **Server appears idle** – The stdio server waits for clients; this is expected until a connection is made.
 
-- “ModuleNotFoundError: mcp” or “httpx not found”:
-  - Ensure your virtual environment is activated and run pip install -r requirements.txt.
+## Optional Customization
 
-- Claude Desktop doesn’t show the tools:
-  - Double‑check the claude_desktop_config.json path and that cwd points to this repo.
-  - Restart Claude Desktop after editing the config.
+Adjust the following settings in `servers/boston_opendata/config.py` to tailor the server to your environment:
 
-- Using the wrong Python:
-  - On macOS/Linux, verify python3 --version (or which python).
-  - On Windows, verify py -V and that the venv is activated.
+- `CKAN_BASE_URL` – Target CKAN instance (defaults to Boston's portal)
+- `API_TIMEOUT` – Maximum seconds to wait for CKAN responses
+- `MAX_RECORDS` – Hard cap on returned rows for safety
 
-- Nothing happens when running main:
-  - That’s expected until a client connects. The server is an MCP stdio process.
-
-Customizing (optional)
-
-- To target a different CKAN instance or adjust limits/timeouts, edit servers/boston_opendata/config.py:
-  - CKAN_BASE_URL: base API endpoint (defaults to Boston’s portal).
-  - API_TIMEOUT: per‑request timeout (seconds).
-  - MAX_RECORDS: hard cap for returned rows.
-
-That’s it — your Python MCP server should be ready to use with MCP‑compatible clients like Claude Desktop.
+You're ready to connect the Boston Core MCP server to any MCP-compatible client.
