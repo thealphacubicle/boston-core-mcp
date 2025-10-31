@@ -199,3 +199,4 @@ circuit_manager = CircuitBreakerManager()
 ckan_circuit_breaker = circuit_manager.get_breaker(
     "ckan_api", failure_threshold=3, recovery_timeout=30.0, expected_exception=Exception
 )
+

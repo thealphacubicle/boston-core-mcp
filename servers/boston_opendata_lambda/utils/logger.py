@@ -171,3 +171,4 @@ def log_tool_execution(
         logger.info(f"Tool executed successfully: {tool_name}", extra=log_data)
     else:
         logger.error(f"Tool execution failed: {tool_name}", extra=log_data)
+

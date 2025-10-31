@@ -350,3 +350,4 @@ async def health_check() -> Dict[str, Any]:
             "timestamp": time.time(),
             "error": str(e),
         }
+

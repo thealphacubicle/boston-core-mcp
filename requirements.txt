@@ -5,4 +5,5 @@ python-json-logger>=4.0
 pydantic>=2.12
 pydantic-settings>=2.11
 cachetools>=6.2
+mcpengine[cli,lambda]>=0.1.0
 

@@ -252,3 +252,4 @@ def validate_pagination_params(
         raise ValidationError("Offset too large (maximum 100,000)")
 
     return limit, offset
+

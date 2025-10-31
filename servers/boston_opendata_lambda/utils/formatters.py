@@ -178,3 +178,4 @@ def format_api_response_summary(
         output += f"📄 **Pagination:** Use offset={next_offset} to see next page.\n"
 
     return output
+

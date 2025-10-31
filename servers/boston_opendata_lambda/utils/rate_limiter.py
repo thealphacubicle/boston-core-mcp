@@ -213,3 +213,4 @@ rate_limiter = RateLimiter(
     burst_capacity=20,  # Allow 20 burst requests
     burst_refill_rate=20 / 60,  # Refill burst at 20 tokens per minute
 )
+
