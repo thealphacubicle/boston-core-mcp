@@ -6,7 +6,9 @@ import sys
 from pathlib import Path
 
 # Add the project root to the Python path
-project_root = Path(__file__).parent.parent.parent
+# Test file is at: servers/boston_opendata_lambda/tests/test_local.py
+# Need to go up 4 levels to reach project root
+project_root = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from servers.boston_opendata_lambda.lambda_server import (
@@ -25,11 +27,11 @@ async def test_health_check():
     try:
         health = await perform_health_check()
         print(f"✅ Health check result: {health['status']}")
-        if health['status'] == 'healthy':
+        if health["status"] == "healthy":
             print("   CKAN API is accessible")
         else:
             print(f"   Error: {health.get('error', 'Unknown error')}")
-        return health['status'] == 'healthy'
+        return health["status"] == "healthy"
     except Exception as e:
         print(f"❌ Health check failed: {e}")
         return False
@@ -112,7 +114,7 @@ async def test_query_datastore():
 async def test_error_handling():
     """Test error handling with invalid inputs."""
     print("\n⚠️ Testing error handling...")
-    
+
     # Test search_datasets with invalid input
     try:
         result = await search_datasets("", limit=0)
@@ -120,7 +122,7 @@ async def test_error_handling():
         print(f"   Error message: {result[:100]}...")
     except Exception as e:
         print(f"❌ search_datasets error handling failed: {e}")
-    
+
     # Test get_dataset_info with invalid input
     try:
         result = await get_dataset_info("")
@@ -134,10 +136,10 @@ async def main():
     """Run all tests."""
     print("🚀 Starting Boston OpenData MCP Lambda Server Tests")
     print("=" * 60)
-    
+
     # Track test results
     test_results = []
-    
+
     # Run tests
     test_results.append(await test_health_check())
     test_results.append(await test_search_datasets())
@@ -146,23 +148,23 @@ async def main():
     test_results.append(await test_get_datastore_schema())
     test_results.append(await test_query_datastore())
     await test_error_handling()
-    
+
     # Summary
     print("\n" + "=" * 60)
     print("📊 Test Summary")
     print("=" * 60)
-    
+
     passed = sum(test_results)
     total = len(test_results)
-    
+
     print(f"✅ Passed: {passed}/{total}")
     print(f"❌ Failed: {total - passed}/{total}")
-    
+
     if passed == total:
         print("\n🎉 All tests passed! The Lambda server is ready for deployment.")
     else:
         print(f"\n⚠️ {total - passed} test(s) failed. Please check the errors above.")
-    
+
     return passed == total
 
 

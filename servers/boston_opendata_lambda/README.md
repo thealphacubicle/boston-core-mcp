@@ -180,8 +180,27 @@ When ready for AWS deployment:
 
 1. **Build Docker Image**:
 
+   **For Mac M1 (ARM64) - Recommended:**
+   
    ```bash
-   docker build --platform=linux/amd64 -t boston-opendata-mcp .
+   cd servers/boston_opendata_lambda
+   ./build.sh
+   ```
+   
+   This will build an ARM64 image (faster on M1 Macs). AWS Lambda supports ARM64 (Graviton2), so this works perfectly.
+   
+   **For AMD64 (Standard Lambda):**
+   
+   ```bash
+   cd servers/boston_opendata_lambda
+   PLATFORM=linux/amd64 ./build.sh
+   ```
+   
+   **Manual build:**
+   
+   ```bash
+   # From project root
+   docker build --platform=linux/arm64 -t boston-opendata-mcp -f servers/boston_opendata_lambda/Dockerfile .
    ```
 
 2. **Push to ECR**:
