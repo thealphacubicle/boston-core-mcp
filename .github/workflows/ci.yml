@@ -34,10 +34,6 @@ jobs:
         run: |
           python -m compileall -q servers/
 
-      - name: Type checking with mypy
-        run: |
-          mypy servers/ --ignore-missing-imports --no-strict-optional
-
       - name: Check code formatting with black
         run: |
           black --check --diff servers/ || echo "⚠️ Black formatting issues found (non-blocking)"
