@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+      - 'feature/*'
+  push:
+    branches:
+      - main
+      - develop
+      - 'feature/*'
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e ".[dev]"
+
+      - name: Check Python syntax
+        run: |
+          python -m compileall -q servers/
+
+      - name: Check code formatting with black
+        run: |
+          black --check --diff servers/ || echo "⚠️ Black formatting issues found (non-blocking)"
+
+  terraform-validate:
+    runs-on: ubuntu-latest
+    needs: code-quality
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.0.0'
+
+      - name: Terraform Init
+        working-directory: servers/boston_opendata_lambda/terraform
+        run: |
+          terraform init -backend=false
+
+      - name: Terraform Validate
+        working-directory: servers/boston_opendata_lambda/terraform
+        run: |
+          terraform validate
+
