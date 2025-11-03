@@ -4,13 +4,16 @@ This directory contains Terraform configuration files to deploy the Boston OpenD
 
 ## Overview
 
-Terraform automates the creation of all AWS resources needed to run the MCP server:
+Terraform automates the entire deployment process in a single command:
 
 - **ECR Repository**: Stores Docker container images
+- **Docker Build & Push**: Automatically builds and pushes your Docker image (no manual steps!)
 - **Lambda Function**: Runs your serverless code
 - **IAM Role**: Permissions for Lambda to execute and log
 - **Function URL**: HTTPS endpoint to access the server
 - **CloudWatch Logs**: Automatic logging for debugging
+
+**One `terraform apply` does it all!** The Docker image is automatically built and pushed before the Lambda function is created.
 
 ## Prerequisites
 
@@ -48,11 +51,14 @@ Before you begin, ensure you have:
    # Or download from: https://www.terraform.io/downloads
    ```
 
-4. **Docker** installed and running
+4. **Docker** installed and running (required for automated builds)
 
    ```bash
-   # Verify Docker is running
+   # Verify Docker is installed and running
    docker ps
+   
+   # Docker is used automatically by Terraform to build and push images
+   # No manual Docker commands needed!
    ```
 
 5. **Verify AWS Access**
@@ -108,9 +114,9 @@ Review the output:
 - Check the region and resource names are correct
 - Look for any warnings
 
-### Step 4: Deploy Infrastructure
+### Step 4: Deploy Everything (One Command!)
 
-Create all AWS resources:
+Deploy all resources including automatic Docker build and push:
 
 ```bash
 terraform apply
@@ -118,62 +124,24 @@ terraform apply
 
 Terraform will:
 
-1. Show you the plan again
+1. Show you the plan
 2. Ask: "Do you want to perform these actions?"
 3. Type `yes` and press Enter
-4. Create all resources (takes 2-5 minutes)
+4. Create ECR repository
+5. **Automatically build and push Docker image** (this takes 2-5 minutes)
+6. Create Lambda function with the image
+7. Create Function URL
+8. Set up IAM roles and CloudWatch logs
+
+**Note**: The first `terraform apply` will take 2-5 minutes because it builds the Docker image. Subsequent applies are faster unless source code changes.
 
 **Save the outputs!** Terraform will show:
 
-- `ecr_repository_url` - You'll need this to push your Docker image
-- `lambda_function_name` - For updating the function
-- `function_url` - Your HTTPS endpoint (will work after you push code)
+- `ecr_repository_url` - Your ECR repository URL
+- `lambda_function_name` - Name of your Lambda function
+- `function_url` - Your HTTPS endpoint (ready to use!)
 
-### Step 5: Build and Push Docker Image
-
-Now you need to build your code and push it to ECR:
-
-```bash
-# Get the ECR repository URL (from terraform output)
-cd ../..  # Back to project root
-export REPOSITORY_URL=$(cd servers/boston_opendata_lambda/terraform && terraform output -raw ecr_repository_url)
-export FUNCTION_NAME=$(cd servers/boston_opendata_lambda/terraform && terraform output -raw lambda_function_name)
-
-# Get AWS region
-export AWS_REGION=$(cd servers/boston_opendata_lambda/terraform && terraform output -raw aws_region)
-
-# Login to ECR
-aws ecr get-login-password --region $AWS_REGION | \
-  docker login --username AWS --password-stdin $REPOSITORY_URL
-
-# Build the Docker image (ARM64 for Graviton2 - recommended)
-docker build \
-  --platform linux/arm64 \
-  --provenance=false \
-  -t boston-opendata-mcp:latest \
-  -f servers/boston_opendata_lambda/Dockerfile .
-
-# Tag for ECR
-docker tag boston-opendata-mcp:latest ${REPOSITORY_URL}:latest
-
-# Push to ECR
-docker push ${REPOSITORY_URL}:latest
-```
-
-### Step 6: Update Lambda Function
-
-Tell Lambda to use your new image:
-
-```bash
-aws lambda update-function-code \
-  --function-name $FUNCTION_NAME \
-  --image-uri ${REPOSITORY_URL}:latest
-
-# Wait for update to complete
-aws lambda wait function-updated --function-name $FUNCTION_NAME
-```
-
-### Step 7: Get Function URL
+### Step 5: Get Function URL
 
 ```bash
 cd servers/boston_opendata_lambda/terraform
@@ -186,17 +154,21 @@ You should see something like:
 https://abc123xyz.lambda-url.us-east-1.on.aws/
 ```
 
-### Step 8: Test the Deployment
+### Step 6: Test the Deployment
 
 ```bash
-# Test the Function URL (replace with your actual URL)
-curl https://your-function-url.lambda-url.us-east-1.on.aws/
+# Get your Function URL
+FUNCTION_URL=$(terraform output -raw function_url)
+echo "Function URL: $FUNCTION_URL"
+
+# Test the endpoint (should return "Not Found" - this is normal for MCP endpoints)
+curl $FUNCTION_URL
 
 # Check CloudWatch logs
 aws logs tail /aws/lambda/boston-opendata-mcp --follow
 ```
 
-### Step 9: Connect from Claude Desktop
+### Step 7: Connect from Claude Desktop
 
 Use MCPEngine proxy to connect:
 
@@ -257,46 +229,43 @@ terraform apply
 
 ```bash
 terraform output
-# Save the ecr_repository_url and lambda_function_name
+# Shows: ecr_repository_url, lambda_function_name, function_url
 ```
 
-### 6. Build and Push
-
-```bash
-# Use the ECR URL from step 5
-aws ecr get-login-password --region <region> | docker login --username AWS --password-stdin <ecr-url>
-docker build --platform linux/arm64 --provenance=false -t boston-opendata-mcp:latest -f ../Dockerfile ../..
-docker tag boston-opendata-mcp:latest <ecr-url>:latest
-docker push <ecr-url>:latest
-```
-
-### 7. Update Lambda
-
-```bash
-aws lambda update-function-code \
-  --function-name <function-name> \
-  --image-uri <ecr-url>:latest
-```
+**Note**: The Docker image is automatically built and pushed during `terraform apply`. No manual steps needed!
 
 ## Updating After Code Changes
 
 When you make changes to your Python code:
 
-1. **Rebuild and push the Docker image** (Steps 5 from Quick Start)
-2. **Update Lambda function** (Step 6 from Quick Start)
+1. **Run `terraform apply`** - Terraform automatically detects code changes and rebuilds the Docker image
+   
+   ```bash
+   terraform apply
+   ```
+   
+   The Docker image will be rebuilt if any of these files change:
+   - `Dockerfile`
+   - `lambda_server.py`
+   - `requirements.txt`
 
-You do NOT need to run `terraform apply` again unless you're changing infrastructure (timeout, memory, environment variables, etc.).
+2. **That's it!** Terraform automatically:
+   - Rebuilds the Docker image
+   - Pushes it to ECR
+   - Updates the Lambda function with the new image
+
+You do NOT need to manually build or push Docker images anymore.
 
 ### Updating Infrastructure (Timeout, Memory, Environment Variables)
 
-If you change `terraform.tfvars`:
+If you change infrastructure settings in `terraform.tfvars`:
 
 ```bash
 terraform plan    # See what will change
 terraform apply   # Apply the changes
 ```
 
-Note: Some changes require rebuilding and pushing the Docker image again.
+**Note**: Changing infrastructure settings (timeout, memory, environment variables) will NOT trigger a Docker rebuild unless source files also changed.
 
 ## Configuration Options
 
@@ -392,19 +361,31 @@ Or view in AWS Console:
 
 - Start Docker Desktop
 - Verify with `docker ps`
+- Terraform's automated build requires Docker to be running
 
 **Error: "platform linux/arm64 not supported"**
 
-- Use `linux/amd64` instead: `docker build --platform linux/amd64 ...`
-- Update `lambda_architecture = "x86_64"` in terraform.tfvars
+- Change architecture in `terraform.tfvars`: `lambda_architecture = "x86_64"`
+- Re-run `terraform apply`
+- Terraform will automatically use the correct platform
+
+**Error: "failed to build: resolve : lstat servers: no such file or directory"**
+
+- Ensure you're running `terraform apply` from the `terraform/` directory
+- The build script needs to find the project root relative to the terraform directory
 
 ### Lambda Function Errors
 
 **Function URL returns error**
 
 - Check CloudWatch logs for details
-- Verify Docker image was pushed successfully
-- Ensure Lambda function update completed
+- Verify Docker image was built and pushed (check Terraform output during apply)
+- The image is automatically built/pushed during `terraform apply`, so if it succeeded, the image should be available
+
+**Error: "Source image does not exist"**
+
+- This shouldn't happen with automated builds
+- If it occurs, re-run `terraform apply` - it will rebuild and push the image
 
 **Timeout errors**
 

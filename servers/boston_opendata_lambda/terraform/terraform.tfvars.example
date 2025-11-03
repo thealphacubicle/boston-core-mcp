@@ -37,10 +37,11 @@ log_retention_days = 14  # Logs older than this will be automatically deleted
 
 # Tags applied to all resources
 tags = {
-  Project     = "Boston-Core-MCP"
-  Environment = "production"
-  ManagedBy   = "Terraform"
-  Owner       = "City-of-Boston-DoIT"
+  Project              = "Boston-Core-MCP"
+  Environment          = "production"
+  ManagedBy            = "Terraform"
+  Owner                = "City-of-Boston-DoIT"
+  launchpad-experiment = "true"
   # Add any other tags you want
 }
 

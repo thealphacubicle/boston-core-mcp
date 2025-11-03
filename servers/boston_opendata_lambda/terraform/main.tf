@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -53,6 +57,53 @@ resource "aws_ecr_lifecycle_policy" "boston_opendata_mcp" {
       }
     ]
   })
+}
+
+# Build and push Docker image to ECR
+resource "null_resource" "docker_build_and_push" {
+  # Wait for ECR repository and lifecycle policy to be created
+  depends_on = [
+    aws_ecr_repository.boston_opendata_mcp,
+    aws_ecr_lifecycle_policy.boston_opendata_mcp
+  ]
+
+  # Trigger rebuild when source files change
+  triggers = {
+    dockerfile_hash     = filemd5("${path.module}/../Dockerfile")
+    lambda_server_hash  = filemd5("${path.module}/../lambda_server.py")
+    requirements_hash   = filemd5("${path.module}/../../../requirements.txt")
+    repository_url      = aws_ecr_repository.boston_opendata_mcp.repository_url
+    architecture        = var.lambda_architecture
+  }
+
+  # Build and push Docker image
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      REPO_URL="${aws_ecr_repository.boston_opendata_mcp.repository_url}"
+      AWS_REGION="${var.aws_region}"
+      ARCH="${var.lambda_architecture == "arm64" ? "arm64" : "amd64"}"
+      
+      echo "Logging into ECR..."
+      aws ecr get-login-password --region $AWS_REGION | \
+        docker login --username AWS --password-stdin $REPO_URL
+      
+      echo "Building Docker image for platform linux/$ARCH..."
+      cd ${path.module}/../../..
+      docker build \
+        --platform linux/$ARCH \
+        --provenance=false \
+        -t ${var.ecr_repository_name}:latest \
+        -f servers/boston_opendata_lambda/Dockerfile .
+      
+      echo "Tagging image for ECR..."
+      docker tag ${var.ecr_repository_name}:latest $REPO_URL:latest
+      
+      echo "Pushing image to ECR..."
+      docker push $REPO_URL:latest
+      echo "Docker image pushed successfully!"
+    EOT
+  }
 }
 
 # IAM Role for Lambda execution
@@ -134,6 +185,7 @@ resource "aws_lambda_function" "boston_opendata_mcp" {
   tags = var.tags
 
   depends_on = [
+    null_resource.docker_build_and_push,  # Wait for Docker image to be pushed
     aws_iam_role_policy_attachment.lambda_basic_execution,
     aws_iam_role_policy.lambda_logs,
     aws_iam_role_policy_attachment.lambda_xray
@@ -147,23 +199,16 @@ resource "aws_lambda_function_url" "boston_opendata_mcp" {
 
   cors {
     allow_credentials = false
-    allow_origins     = var.function_url_cors_origins
-    allow_methods     = var.function_url_cors_methods
-    allow_headers     = var.function_url_cors_headers
+    allow_origins     = length(var.function_url_cors_origins) == 1 && var.function_url_cors_origins[0] == "*" ? ["*"] : var.function_url_cors_origins
+    allow_methods     = ["*"]  # Lambda Function URL requires "*" for all methods or specific list
+    allow_headers     = length(var.function_url_cors_headers) == 1 && var.function_url_cors_headers[0] == "*" ? ["*"] : var.function_url_cors_headers
     expose_headers    = []
     max_age           = 86400
   }
 }
 
-# Lambda Function URL Invoke Permission (required for public access with NONE auth)
-resource "aws_lambda_permission" "function_url_invoke" {
-  count = var.function_url_auth_type == "NONE" ? 1 : 0
-
-  statement_id  = "FunctionURLAllowPublicInvoke"
-  action        = "lambda:InvokeFunctionUrl"
-  function_name = aws_lambda_function.boston_opendata_mcp.function_name
-  principal     = "*"
-}
+# Note: Lambda Function URL with authorization_type = "NONE" automatically allows public access
+# No separate permission resource is needed (and actually causes errors)
 
 # CloudWatch Log Group for Lambda
 resource "aws_cloudwatch_log_group" "lambda_logs" {
