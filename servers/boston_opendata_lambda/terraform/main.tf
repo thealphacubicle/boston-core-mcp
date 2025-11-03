@@ -30,26 +30,29 @@ resource "aws_ecr_repository" "boston_opendata_mcp" {
     encryption_type = "AES256"
   }
 
-  lifecycle_policy {
-    policy = jsonencode({
-      rules = [
-        {
-          rulePriority = 1
-          description  = "Keep last 10 images"
-          selection = {
-            tagStatus     = "any"
-            countType     = "imageCountMoreThan"
-            countNumber   = 10
-          }
-          action = {
-            type = "expire"
-          }
-        }
-      ]
-    })
-  }
-
   tags = var.tags
+}
+
+# ECR Lifecycle Policy - keeps only last 10 images to save storage costs
+resource "aws_ecr_lifecycle_policy" "boston_opendata_mcp" {
+  repository = aws_ecr_repository.boston_opendata_mcp.name
+
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Keep last 10 images"
+        selection = {
+          tagStatus     = "any"
+          countType     = "imageCountMoreThan"
+          countNumber   = 10
+        }
+        action = {
+          type = "expire"
+        }
+      }
+    ]
+  })
 }
 
 # IAM Role for Lambda execution
@@ -99,6 +102,13 @@ resource "aws_iam_role_policy" "lambda_logs" {
   })
 }
 
+# X-Ray tracing permissions (conditional)
+resource "aws_iam_role_policy_attachment" "lambda_xray" {
+  count      = var.enable_xray_tracing ? 1 : 0
+  role       = aws_iam_role.lambda_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
 # Lambda Function
 resource "aws_lambda_function" "boston_opendata_mcp" {
   function_name = var.lambda_function_name
@@ -125,14 +135,15 @@ resource "aws_lambda_function" "boston_opendata_mcp" {
 
   depends_on = [
     aws_iam_role_policy_attachment.lambda_basic_execution,
-    aws_iam_role_policy.lambda_logs
+    aws_iam_role_policy.lambda_logs,
+    aws_iam_role_policy_attachment.lambda_xray
   ]
 }
 
 # Lambda Function URL (for HTTP access)
 resource "aws_lambda_function_url" "boston_opendata_mcp" {
   function_name      = aws_lambda_function.boston_opendata_mcp.function_name
-  authorization_type  = var.function_url_auth_type
+  authorization_type = var.function_url_auth_type
 
   cors {
     allow_credentials = false
@@ -142,6 +153,16 @@ resource "aws_lambda_function_url" "boston_opendata_mcp" {
     expose_headers    = []
     max_age           = 86400
   }
+}
+
+# Lambda Function URL Invoke Permission (required for public access with NONE auth)
+resource "aws_lambda_permission" "function_url_invoke" {
+  count = var.function_url_auth_type == "NONE" ? 1 : 0
+
+  statement_id  = "FunctionURLAllowPublicInvoke"
+  action        = "lambda:InvokeFunctionUrl"
+  function_name = aws_lambda_function.boston_opendata_mcp.function_name
+  principal     = "*"
 }
 
 # CloudWatch Log Group for Lambda
