@@ -1,0 +1,47 @@
+# Copy this file to terraform.tfvars and customize for your environment
+# terraform.tfvars is gitignored and contains your actual values
+
+# AWS Region where resources will be created
+aws_region = "us-east-1"
+
+# Lambda function and ECR repository names
+lambda_function_name = "boston-opendata-mcp"
+ecr_repository_name   = "boston-opendata-mcp"
+
+# Lambda function configuration
+lambda_timeout     = 30        # Maximum execution time in seconds
+lambda_memory_size = 512       # Memory allocation in MB
+lambda_architecture = "arm64" # Use arm64 for Graviton2 (cheaper) or x86_64
+
+# Function URL configuration
+function_url_auth_type = "NONE"  # Change to AWS_IAM for production if you want authentication
+# CORS settings - adjust if you need specific origins
+function_url_cors_origins = ["*"]
+function_url_cors_methods = ["GET", "POST", "OPTIONS"]
+function_url_cors_headers = ["*"]
+
+# Environment variables for your Lambda function
+# These are passed to the application code
+lambda_environment_variables = {
+  BOSTON_OPENDATA_ENVIRONMENT = "production"
+  BOSTON_OPENDATA_LOG_LEVEL   = "INFO"
+  BOSTON_OPENDATA_LOG_FORMAT   = "json"
+  # BOSTON_OPENDATA_CKAN_BASE_URL = "https://data.boston.gov/api/3/action"  # Uncomment to override default
+}
+
+# Optional: Enable X-Ray tracing (adds cost)
+enable_xray_tracing = false
+
+# CloudWatch log retention (days)
+log_retention_days = 14  # Logs older than this will be automatically deleted
+
+# Tags applied to all resources
+tags = {
+  Project              = "Boston-Core-MCP"
+  Environment          = "production"
+  ManagedBy            = "Terraform"
+  Owner                = "City-of-Boston-DoIT"
+  launchpad-experiment = "true"
+  # Add any other tags you want
+}
+
