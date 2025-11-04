@@ -20,12 +20,12 @@ Key characteristics:
 
 ## Included Servers
 
-| Server                           | Description                                                                                                                   | Deployment Options                     |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `servers/boston_opendata`        | Exposes Boston's CKAN portal (`https://data.boston.gov`) through MCP tools for dataset discovery and DataStore queries.       | stdio (local), **Lambda (production)** |
-| `servers/boston_opendata_lambda` | Lambda-compatible version using MCPEngine for serverless AWS deployment. Same functionality as stdio version.                 | **AWS Lambda only**                    |
-| `servers/mbta_server`            | MBTA v3 API: predictions, service alerts, stop search, routes, and schedules. Optional `MBTA_API_KEY` for higher rate limits. | stdio (local)                          |
-| `servers/census_server`          | U.S. Census Bureau APIs: ACS 5-year and 2020 Decennial PL tables, variable search, and geography listings.                    | stdio (local)                          |
+| Server | Description | Deployment Options |
+| --- | --- | --- |
+| `servers/boston_opendata` | Exposes Boston's CKAN portal (`https://data.boston.gov`) through MCP tools for dataset discovery and DataStore queries. | stdio (local), **Lambda (production)** |
+| `servers/boston_opendata_lambda` | Lambda-compatible version using MCPEngine for serverless AWS deployment. Same functionality as stdio version. | **AWS Lambda only** |
+| `servers/mbta_server` | MBTA v3 API: predictions, service alerts, stop search, routes, and schedules. Optional `MBTA_API_KEY` for higher rate limits. | stdio (local) |
+| `servers/census_server` | U.S. Census Bureau APIs: ACS 5-year and 2020 Decennial PL tables, variable search, and geography listings. | stdio (local) |
 
 ## Running Locally (stdio)
 
@@ -154,7 +154,6 @@ The Boston OpenData Lambda server includes production-ready Terraform scripts th
 - **CloudWatch Log Groups**: Centralized logging with configurable retention
 
 **Key Features:**
-
 - ✅ Validated and tested Terraform configuration
 - ✅ Supports both ARM64 (cost-effective) and x86_64 architectures
 - ✅ Optional X-Ray tracing for distributed debugging
@@ -162,7 +161,6 @@ The Boston OpenData Lambda server includes production-ready Terraform scripts th
 - ✅ Comprehensive security with IAM best practices
 
 **Recent Improvements:**
-
 - Fixed ECR lifecycle policy configuration for AWS provider v5.0+
 - Added conditional X-Ray permissions when tracing is enabled
 - Added Lambda Function URL invoke permissions for public access

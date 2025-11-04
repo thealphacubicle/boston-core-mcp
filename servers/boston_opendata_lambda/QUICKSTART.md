@@ -10,7 +10,11 @@ Before you start, make sure you have:
 2. **Python installed** (version 3.10 or higher)
    - Check if you have it: Open Terminal/Command Prompt and type `python --version`
    - If not installed: Download from [python.org](https://www.python.org/downloads/)
-3. **Claude Desktop installed**
+3. **Docker Desktop installed and running**
+   - Download from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop)
+   - **Important**: Docker must be running (not just installed) for the connection to work
+   - Check if it's running: Open Docker Desktop app and wait until it says "Docker Desktop is running"
+4. **Claude Desktop installed**
    - Download from [claude.ai/download](https://claude.ai/download)
 
 ## Step-by-Step Instructions
@@ -25,14 +29,26 @@ Before you start, make sure you have:
 Copy and paste this command into your terminal, then press Enter:
 
 ```bash
-pip install mcpengine[cli,lambda]
+pip install 'mcpengine[cli,lambda]'
 ```
+
+**Note**: The quotes around `'mcpengine[cli,lambda]'` are important - they prevent errors on some systems.
 
 **What this does**: Installs the tool needed to connect Claude to the MCP server.
 
 **Wait for it to finish** - this may take 1-2 minutes. You'll see "Successfully installed" when it's done.
 
-### Step 3: Connect Claude to the Server
+### Step 3: Make Sure Docker is Running
+
+**Before proceeding**, make sure Docker Desktop is running:
+
+1. Open Docker Desktop application
+2. Wait until you see "Docker Desktop is running" (green indicator)
+3. You can verify by running in terminal: `docker ps` (should not show an error)
+
+**If Docker is not running**, the connection will fail with a "Connection refused" error.
+
+### Step 4: Connect Claude to the Server
 
 Copy and paste this **entire command** into your terminal, then press Enter:
 
@@ -48,13 +64,13 @@ mcpengine proxy boston-opendata-lambda https://kdbjj7ebdewlcy24bt4wbf3uju0tjgdf.
 - **Leave this terminal window open** - don't close it!
 - You can minimize it, but don't close it
 
-### Step 4: Open Claude Desktop
+### Step 5: Open Claude Desktop
 
 1. Open Claude Desktop (the app you downloaded earlier)
 2. Start a new conversation
 3. You should see **Boston OpenData tools** available!
 
-### Step 5: Test It Out
+### Step 6: Test It Out
 
 Try asking Claude something like:
 
@@ -70,18 +86,27 @@ Claude will use the Boston OpenData tools automatically!
 
 **Fix**: Python might not be installed correctly. Try:
 
-- Mac: `python3 -m pip install mcpengine[cli,lambda]`
+- Mac: `python3 -m pip install 'mcpengine[cli,lambda]'`
 - Windows: Make sure Python was installed with "Add Python to PATH" checked
 
 ### "Command not found: mcpengine"
 
 **Fix**: The installation might have failed. Try running Step 2 again.
 
+### "Connection refused" or "ConnectionRefusedError"
+
+**Fix**: Docker Desktop is not running.
+
+1. Open Docker Desktop application
+2. Wait until it fully starts (shows "Docker Desktop is running")
+3. Verify with: `docker ps` (should not show an error)
+4. Try the connection command again
+
 ### "Cannot connect" or "Connection failed"
 
 **Fix**:
 
-1. Make sure you copied the entire command in Step 3 (it's very long!)
+1. Make sure you copied the entire command in Step 4 (it's very long!)
 2. Make sure there are no extra spaces
 3. Make sure your internet connection is working
 4. Try running the command again
@@ -90,9 +115,10 @@ Claude will use the Boston OpenData tools automatically!
 
 **Fix**:
 
-1. Make sure the terminal with the proxy is still running (Step 3)
-2. **Completely close and restart Claude Desktop**
-3. Make sure you're starting a new conversation
+1. Make sure the terminal with the proxy is still running (Step 4)
+2. Make sure Docker Desktop is running
+3. **Completely close and restart Claude Desktop**
+4. Make sure you're starting a new conversation
 
 ### The terminal command stops working
 
