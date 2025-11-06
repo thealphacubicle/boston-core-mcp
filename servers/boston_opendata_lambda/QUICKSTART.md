@@ -60,7 +60,7 @@ mcpengine proxy boston-opendata-lambda https://kdbjj7ebdewlcy24bt4wbf3uju0tjgdf.
 
 **Important**:
 
-- You'll see some messages like "Starting proxy..." or "Connected"
+- Once you run the command from above, you WILL NOT see any output (this is normal!). To verify this is running, run `docker ps` t verify that the proxy is running.
 - **Leave this terminal window open** - don't close it!
 - You can minimize it, but don't close it
 
