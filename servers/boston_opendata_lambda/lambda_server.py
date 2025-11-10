@@ -118,17 +118,25 @@ logger.info("MCPEngine initialized successfully", extra={"component": "engine"})
 
 @engine.tool()
 async def search_datasets(query: str, limit: int = 10) -> str:
-    """Search for datasets on Boston's Open Data portal.
+    """Search Boston Open Data portal for datasets matching keywords or topics.
 
-    Use keywords like '311', 'crime', 'permits', 'parking', etc.
-    Returns matching datasets with descriptions and IDs.
+    Use this when the user mentions a specific topic, keyword, or data type they're
+    looking for (e.g., "crime data", "311 requests", "parking violations"). This
+    searches across dataset titles, descriptions, and tags. Returns dataset IDs
+    that can be used with get_dataset_info to see available resources.
+
+    When to use: User asks "find", "search for", "show me data about", or mentions
+    specific topics like crime, 311, permits, parking, budget, etc.
 
     Args:
-        query: Search keywords (e.g., '311', 'crime', 'building permits')
-        limit: Maximum number of results to return (1-100)
+        query: Keywords to search for (e.g., '311', 'crime', 'parking', 'permits').
+               Single words or phrases work. Case-insensitive.
+        limit: Maximum results to return (1-100, default 10). Use 5-10 for focused
+               searches, 20-50 for broader exploration.
 
     Returns:
-        Formatted string with search results
+        Dataset summaries including: title, ID, description, organization, and
+        creation date. IDs can be used with get_dataset_info.
     """
     start_time = time.time()
     tool_name = "search_datasets"
@@ -259,15 +267,23 @@ async def search_datasets(query: str, limit: int = 10) -> str:
 
 @engine.tool()
 async def list_all_datasets(limit: int = 20) -> str:
-    """List all available datasets on Boston's Open Data portal.
+    """List all available datasets on Boston's Open Data portal without filtering.
 
-    Returns dataset names/IDs. Use this to browse what's available.
+    Use this only when the user wants to browse or explore without a specific topic
+    in mind (e.g., "what datasets are available?", "list all datasets", "show me
+    everything"). If user mentions ANY specific topic, use search_datasets instead.
+
+    When to use: User asks to "list all", "show everything", "what's available",
+    or wants to browse without specific criteria.
+
+    When NOT to use: User mentions topics like crime, 311, parking, permits, etc.
+    Use search_datasets for those cases.
 
     Args:
-        limit: Number of datasets to return (1-100)
+        limit: Number of dataset IDs to return (1-100, default 20).
 
     Returns:
-        Formatted string with list of datasets
+        Simple list of dataset IDs/names. Use IDs with get_dataset_info for details.
     """
     start_time = time.time()
     tool_name = "list_all_datasets"
@@ -365,16 +381,24 @@ async def list_all_datasets(limit: int = 20) -> str:
 
 @engine.tool()
 async def get_dataset_info(dataset_id: str) -> str:
-    """Get detailed information about a specific dataset, including all its resources.
+    """Get detailed metadata and resources for a specific dataset.
 
-    Use the dataset ID (name) from search results.
-    This shows you resource IDs needed to query the actual data.
+    Use this AFTER search_datasets or list_all_datasets to see what data resources
+    (files/tables) are available in a dataset. This is REQUIRED before querying
+    data because it provides resource_ids needed for query_datastore.
+
+    When to use: When you have a dataset_id and need to find queryable resource_ids,
+    or when user asks "what's in this dataset?" or "show me details about [dataset]".
 
     Args:
-        dataset_id: Dataset ID or name (e.g., '311-service-requests', 'crime-incident-reports')
+        dataset_id: Dataset ID from search_datasets or list_all_datasets
+                   (e.g., '311-service-requests', 'crime-incident-reports').
+                   Must match exactly.
 
     Returns:
-        Formatted string with dataset details
+        Complete dataset metadata including: title, description, organization,
+        all resources with their IDs, and a highlighted list of queryable
+        resource_ids that work with query_datastore.
     """
     start_time = time.time()
     tool_name = "get_dataset_info"
@@ -536,22 +560,34 @@ async def query_datastore(
     sort: Optional[str] = None,
     fields: Optional[List[str]] = None,
 ) -> str:
-    """Query actual data from a DataStore resource.
+    """Query and retrieve actual data records from a DataStore resource.
 
-    You must have the resource_id from get_dataset_info.
-    Supports filtering, searching, sorting, and limiting results.
+    Use this to get REAL DATA (rows/records) from Boston's open data. This is the
+    final step - it returns actual data values. You MUST have a resource_id from
+    get_dataset_info first (look for "Queryable Resources" in that output).
+
+    When to use: User asks for "actual data", "show me records", "get data where...",
+    "filter by...", or wants to see examples/samples from a dataset.
+
+    IMPORTANT: Only works with queryable resources (datastore_active=true). Check
+    get_dataset_info output for valid resource_ids.
 
     Args:
-        resource_id: Resource ID (UUID format) from get_dataset_info
-        limit: Number of records to return (1-1000)
-        offset: Number of records to skip (for pagination)
-        search_text: Full-text search across all fields (optional)
-        filters: Filter by specific field values (optional)
-        sort: Sort by field name. Use 'field_name asc' or 'field_name desc'
-        fields: Specific fields to return (optional)
+        resource_id: Resource ID (UUID) from get_dataset_info's "Queryable Resources"
+                    section. Required.
+        limit: Number of records to return (1-1000, default 10). Use 10-50 for initial
+               queries, increase if user wants more.
+        offset: Records to skip for pagination (default 0). Use with limit for pages.
+        search_text: Full-text search across all fields (optional). Example: "broken".
+        filters: Filter by field values (optional). Format: {"field": "value"}.
+                Example: {"status": "open"}.
+        sort: Sort results (optional). Format: "field asc" or "field desc".
+             Example: "created_date desc".
+        fields: Specific fields to return (optional). Example: ["id", "title", "status"].
 
     Returns:
-        Formatted string with query results
+        Actual data records with field values, total count, available fields, and
+        pagination info. Shows up to 20 records per query.
     """
     start_time = time.time()
     tool_name = "query_datastore"
@@ -735,16 +771,22 @@ async def query_datastore(
 
 @engine.tool()
 async def get_datastore_schema(resource_id: str) -> str:
-    """Get the schema/structure of a DataStore resource.
+    """Get the schema (field names and data types) for a DataStore resource.
 
-    Shows field names, data types, and descriptions.
-    Useful before querying to understand available fields.
+    Use this BEFORE query_datastore to understand what fields are available and
+    their data types. This helps you know what field names to use in filters,
+    sort, and fields parameters.
+
+    When to use: User asks "what fields are available?", "what columns does this have?",
+    or you need to know field names before filtering/sorting data.
 
     Args:
-        resource_id: Resource ID to get schema for
+        resource_id: Resource ID (UUID) from get_dataset_info's "Queryable Resources".
+                    Must be a queryable resource.
 
     Returns:
-        Formatted string with schema information
+        Complete list of field names with their data types (text, timestamp, numeric,
+        etc.). Use these field names with query_datastore.
     """
     start_time = time.time()
     tool_name = "get_datastore_schema"
