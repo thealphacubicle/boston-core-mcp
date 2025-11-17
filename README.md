@@ -55,7 +55,8 @@ The **Boston OpenData MCP server** includes a production-ready Lambda deployment
 - **Location**: `servers/boston_opendata_lambda/`
 - **Infrastructure**: Fully automated Terraform scripts for AWS resources
 - **Features**: HTTP-based, stateless, scalable, with built-in monitoring
-- **Documentation**: See [`servers/boston_opendata_lambda/README.md`](servers/boston_opendata_lambda/README.md) and [`servers/boston_opendata_lambda/terraform/README.md`](servers/boston_opendata_lambda/terraform/README.md)
+- **Production URL**: `https://kdbjj7ebdewlcy24bt4wbf3uju0tjgdf.lambda-url.us-east-1.on.aws`
+- **Documentation**: See [`docs/LAMBDA_DEPLOYMENT.md`](docs/LAMBDA_DEPLOYMENT.md) and [`docs/LAMBDA_QUICKSTART.md`](docs/LAMBDA_QUICKSTART.md)
 
 #### Quick Lambda Deployment
 
@@ -87,7 +88,7 @@ Example `claude_desktop_config.json` snippet:
     },
     "boston-opendata-lambda": {
       "command": "mcpengine",
-      "args": ["proxy", "boston-opendata-lambda", "https://your-lambda-url.lambda-url.us-east-1.on.aws/", "--mode", "http", "--claude"],
+      "args": ["proxy", "boston-opendata-lambda", "https://kdbjj7ebdewlcy24bt4wbf3uju0tjgdf.lambda-url.us-east-1.on.aws", "--mode", "http", "--claude"],
       "env": {}
     },
     "mbta-server": {
@@ -135,11 +136,17 @@ CONTRIBUTORS.md              # Acknowledgements and contribution guidelines
 
 ## Documentation
 
-- **Quickstart:** [`docs/QUICKSTART.md`](docs/QUICKSTART.md) – install, run, and client integration steps (Boston Open Data focused; patterns apply to all).
-- **Development notes:** [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) – architecture, design decisions, and roadmap.
-- **Lambda Deployment:** [`servers/boston_opendata_lambda/README.md`](servers/boston_opendata_lambda/README.md) – Lambda-specific setup and usage.
-- **Terraform Guide:** [`servers/boston_opendata_lambda/terraform/README.md`](servers/boston_opendata_lambda/terraform/README.md) – step-by-step AWS infrastructure deployment.
-- **AWS Permissions:** [`servers/boston_opendata_lambda/terraform/AWS_PERMISSIONS.md`](servers/boston_opendata_lambda/terraform/AWS_PERMISSIONS.md) – required IAM permissions for Terraform deployment.
+### Getting Started
+- **Quick Start (Lambda):** [`docs/LAMBDA_QUICKSTART.md`](docs/LAMBDA_QUICKSTART.md) – Connect Claude Desktop to the deployed Lambda server in minutes
+- **Local Setup:** [`docs/QUICKSTART.md`](docs/QUICKSTART.md) – Install and run servers locally (stdio version)
+
+### Deployment & Development
+- **Lambda Deployment Guide:** [`docs/LAMBDA_DEPLOYMENT.md`](docs/LAMBDA_DEPLOYMENT.md) – Complete guide for Lambda deployment and local development
+- **Terraform Infrastructure:** [`servers/boston_opendata_lambda/terraform/README.md`](servers/boston_opendata_lambda/terraform/README.md) – Step-by-step AWS infrastructure deployment
+- **AWS Permissions:** [`servers/boston_opendata_lambda/terraform/AWS_PERMISSIONS.md`](servers/boston_opendata_lambda/terraform/AWS_PERMISSIONS.md) – Required IAM permissions for Terraform deployment
+
+### Additional Resources
+- **Development Notes:** [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) – Architecture, design decisions, and roadmap
 
 ## Infrastructure & DevOps
 

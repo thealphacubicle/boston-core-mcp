@@ -27,17 +27,31 @@ Before you start, make sure you have:
 
 ### Step 2: Install MCPEngine
 
-Copy and paste this command into your terminal, then press Enter:
+**Option A: If you're working with the boston-core-mcp repository** (and have a `.venv` folder):
+
+```bash
+# Activate the virtual environment first
+source .venv/bin/activate
+
+# Then install mcpengine
+pip install mcpengine
+```
+
+**Option B: If you're starting fresh** (no `.venv` folder):
 
 ```bash
 python3 -m pip install mcpengine
 ```
 
-**What this does**: Installs the tool needed to connect Claude to the MCP server using Python 3.
+**What this does**: Installs the tool needed to connect Claude to the MCP server.
 
 **Wait for it to finish** - this may take 1-2 minutes. You'll see "Successfully installed" when it's done.
 
-**Important**: If you see an error about Python version, you need to upgrade to Python 3.10 or higher first (see prerequisites above).
+**Important**: If you see an error about Python version:
+
+1. Your system Python is too old (need 3.10+)
+2. Either upgrade your system Python from [python.org](https://www.python.org/downloads/)
+3. Or create a virtual environment with Python 3.10+ first
 
 ### Step 3: Make Sure Docker is Running
 
@@ -51,18 +65,20 @@ python3 -m pip install mcpengine
 
 ### Step 4: Connect Claude to the Server
 
-Copy and paste this **entire command** into your terminal, then press Enter:
+**If you activated the virtual environment in Step 2** (you should see `(.venv)` in your terminal prompt), keep it active and run:
 
 ```bash
 mcpengine proxy boston-opendata-lambda https://kdbjj7ebdewlcy24bt4wbf3uju0tjgdf.lambda-url.us-east-1.on.aws --mode http --claude
 ```
 
+**If you didn't use the virtual environment**, just run the command above in your terminal.
+
 **What this does**: Starts a connection between Claude and the Boston OpenData server.
 
 **Important**:
 
-- Once you run the command from above, you WILL NOT see any output (this is normal!). To verify this is running, run `docker ps` t verify that the proxy is running.
-- **Leave this terminal window open** - don't close it!
+- Once you run the command from above, you WILL NOT see any output (this is normal!). To verify this is running, run `docker ps` to verify that the proxy is running.
+- **Keep this terminal window open** - don't close it! (You'll see `(.venv)` in the prompt if using the virtual environment)
 - You can minimize it, but don't close it
 
 ### Step 5: Open Claude Desktop
@@ -90,6 +106,7 @@ This means your Python version is too old. MCPEngine requires Python 3.10 or hig
 **Fix**:
 
 1. Check your Python version:
+
    ```bash
    python3 --version
    ```
@@ -140,7 +157,7 @@ This means your Python version is too old. MCPEngine requires Python 3.10 or hig
 
 ### The terminal command stops working
 
-**Fix**: Just run Step 3 again. Sometimes the connection drops - this is normal.
+**Fix**: Just run Step 4 again. Sometimes the connection drops - this is normal.
 
 ## Using the Tools
 
@@ -159,10 +176,14 @@ Just ask Claude naturally - it will automatically use the right tool!
 When you're done:
 
 1. Go back to the terminal window
-2. Press `Ctrl + C` (Mac: `Cmd + C`)
+2. Press `Ctrl + C` (not `Cmd + C` on Mac - use `Ctrl`)
 3. The connection will stop
+4. If you used the virtual environment, you can deactivate it with: `deactivate`
 
-To reconnect later, just run Step 3 again.
+To reconnect later:
+
+- If using the virtual environment, first run `source .venv/bin/activate`
+- Then run the proxy command from Step 4 again
 
 ## Need Help?
 

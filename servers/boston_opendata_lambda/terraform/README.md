@@ -161,8 +161,13 @@ https://abc123xyz.lambda-url.us-east-1.on.aws/
 FUNCTION_URL=$(terraform output -raw function_url)
 echo "Function URL: $FUNCTION_URL"
 
-# Test the endpoint (should return "Not Found" - this is normal for MCP endpoints)
+# Test the endpoint (should return "Not Found" at root - this is normal)
 curl $FUNCTION_URL
+
+# Test the MCP endpoint (should return valid JSON response)
+curl -X POST ${FUNCTION_URL}mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
 
 # Check CloudWatch logs
 aws logs tail /aws/lambda/boston-opendata-mcp --follow
@@ -176,8 +181,8 @@ Use MCPEngine proxy to connect:
 # Get the function URL first
 FUNCTION_URL=$(cd servers/boston_opendata_lambda/terraform && terraform output -raw function_url)
 
-# Start the proxy
-mcpengine proxy boston-opendata-lambda $FUNCTION_URL --mode http --claude
+# Start the proxy (note: append 'mcp' to the function URL)
+mcpengine proxy boston-opendata-lambda ${FUNCTION_URL}mcp --mode http --claude
 ```
 
 Then open Claude Desktop - your tools should be available!
