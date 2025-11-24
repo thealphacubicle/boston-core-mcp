@@ -33,10 +33,32 @@ from .utils.validators import (
     validate_datastore_query_fields,
     validate_filter_value,
 )
-from .utils.logger import get_logger, setup_logging, log_tool_execution
+from .utils.logger import (
+    get_logger,
+    setup_logging,
+    log_tool_execution,
+    log_lambda_request,
+    log_lambda_response,
+    log_lambda_error,
+    log_mcp_message,
+    log_request_processing_status,
+    sanitize_for_logging,
+)
 
 # Initialize logger
 logger = get_logger("lambda_server")
+
+# Log initialization (this will appear in CloudWatch when Lambda container starts)
+logger.info(
+    "Lambda function initialized",
+    extra={
+        "component": "lambda_init",
+        "operation": "initialization",
+        "environment": settings.environment,
+        "log_level": settings.log_level,
+        "log_format": settings.log_format,
+    },
+)
 
 
 # ============================================================================
@@ -142,11 +164,27 @@ async def search_datasets(query: str, limit: int = 10) -> str:
     """
     start_time = time.time()
     tool_name = "search_datasets"
+    tool_request_id = f"tool_{int(time.time() * 1000)}"
 
     logger.info(
         f"Tool execution started: {tool_name}",
         extra={
+            "component": "tool_execution",
             "tool": tool_name,
+            "tool_request_id": tool_request_id,
+            "query": query,
+            "requested_limit": limit,
+            "status": "started",
+        },
+    )
+    
+    log_request_processing_status(
+        logger,
+        status="started",
+        stage="tool_execution",
+        details={
+            "tool_name": tool_name,
+            "tool_request_id": tool_request_id,
             "query": query,
             "requested_limit": limit,
         },
@@ -179,7 +217,22 @@ async def search_datasets(query: str, limit: int = 10) -> str:
         logger.debug(
             f"Making CKAN API call for {tool_name}",
             extra={
+                "component": "tool_execution",
                 "tool": tool_name,
+                "tool_request_id": tool_request_id,
+                "action": "package_search",
+                "client_id": client_id,
+                "status": "api_call_started",
+            },
+        )
+        
+        log_request_processing_status(
+            logger,
+            status="in_progress",
+            stage="ckan_api_call",
+            details={
+                "tool_name": tool_name,
+                "tool_request_id": tool_request_id,
                 "action": "package_search",
                 "client_id": client_id,
             },
@@ -197,7 +250,22 @@ async def search_datasets(query: str, limit: int = 10) -> str:
         logger.debug(
             f"CKAN API call completed for {tool_name}",
             extra={
+                "component": "tool_execution",
                 "tool": tool_name,
+                "tool_request_id": tool_request_id,
+                "total_count": total_count,
+                "returned_count": len(datasets),
+                "status": "api_call_completed",
+            },
+        )
+        
+        log_request_processing_status(
+            logger,
+            status="completed",
+            stage="ckan_api_call",
+            details={
+                "tool_name": tool_name,
+                "tool_request_id": tool_request_id,
                 "total_count": total_count,
                 "returned_count": len(datasets),
             },
@@ -220,7 +288,24 @@ async def search_datasets(query: str, limit: int = 10) -> str:
 
         duration_ms = (time.time() - start_time) * 1000
         log_tool_execution(
-            logger, tool_name, duration_ms, success=True, datasets_found=len(datasets)
+            logger,
+            tool_name,
+            duration_ms,
+            success=True,
+            tool_request_id=tool_request_id,
+            datasets_found=len(datasets),
+        )
+        
+        log_request_processing_status(
+            logger,
+            status="completed",
+            stage="tool_execution",
+            details={
+                "tool_name": tool_name,
+                "tool_request_id": tool_request_id,
+                "duration_ms": duration_ms,
+                "datasets_found": len(datasets),
+            },
         )
 
         return output
@@ -786,12 +871,8 @@ async def query_datastore(
                         f"Valid fields for this resource are: {field_list}. "
                     )
                     if corrections_made:
-                        error_msg += (
-                            f"Note: Some field names were auto-corrected: {corrections_made}. "
-                        )
-                    error_msg += (
-                        "Please call get_datastore_schema first to see all available fields."
-                    )
+                        error_msg += f"Note: Some field names were auto-corrected: {corrections_made}. "
+                    error_msg += "Please call get_datastore_schema first to see all available fields."
                     logger.warning(
                         f"Invalid field names detected for {tool_name}",
                         extra={
@@ -818,23 +899,39 @@ async def query_datastore(
         if filters:
             params["filters"] = json.dumps(filters)
         if sort:
-            params["sort"] = sort
+            # CKAN datastore_search expects sort as a comma-separated string: "field_name direction"
+            # Format: "fieldname1 asc, fieldname2 desc" or just "fieldname1 desc"
+            # Parse "field_name desc" or "field_name asc" into CKAN's expected format
+            sort_parts = sort.strip().split()
+            if len(sort_parts) >= 2:
+                field_name = sort_parts[0]
+                direction = sort_parts[1].lower()  # "asc" or "desc"
+                # CKAN expects: "field_name direction" as a string, not JSON array
+                params["sort"] = f"{field_name} {direction}"
+            else:
+                # Just field name, default to ascending
+                params["sort"] = f"{sort_parts[0]} asc"
         if fields:
             params["fields"] = ",".join(fields)
 
+        # Use POST method when sort or filters are present to avoid URL encoding issues with JSON strings
+        # GET is fine for simple queries, but POST handles JSON parameters better
+        method = "POST" if (sort or filters) else "GET"
+        
         # Make API call (reuse client_id from schema fetch)
         logger.debug(
             f"Making CKAN API call for {tool_name}",
             extra={
                 "tool": tool_name,
                 "action": "datastore_search",
+                "method": method,
                 "resource_id": resource_id,
                 "client_id": client_id,
                 "query_params_keys": list(params.keys()),
             },
         )
 
-        result = await ckan_api_call("datastore_search", params, client_id=client_id)
+        result = await ckan_api_call("datastore_search", params, method=method, client_id=client_id)
         records = result.get("records", [])
         total = result.get("total", 0)
         fields_info = result.get("fields", [])
@@ -1132,8 +1229,280 @@ async def get_datastore_schema(resource_id: str) -> str:
 
 # Create Lambda-compatible handler
 logger.debug("Creating Lambda handler", extra={"component": "handler"})
-handler = engine.get_lambda_handler()
+_base_handler = engine.get_lambda_handler()
 logger.info("Lambda handler created successfully", extra={"component": "handler"})
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """Wrapped Lambda handler with comprehensive CloudWatch logging.
+
+    This wrapper adds detailed logging for:
+    - Request source (API Gateway, direct invocation, etc.)
+    - Full request event details
+    - Lambda context information
+    - MCP protocol messages (initialize, tools/list, tools/call, etc.)
+    - Request processing status at each stage
+    - Response status codes and full response
+    - Request duration
+    - Any errors that occur
+
+    Args:
+        event: Lambda event dictionary
+        context: Lambda context object
+
+    Returns:
+        Lambda response dictionary
+    """
+    import time
+    import os
+
+    # Ensure logging is initialized for CloudWatch (use JSON format in Lambda)
+    if not logger.handlers:
+        log_format = os.environ.get("BOSTON_OPENDATA_LOG_FORMAT", "json")
+        log_level = os.environ.get("BOSTON_OPENDATA_LOG_LEVEL", "INFO")
+        setup_logging(level=log_level, format_type=log_format)
+
+    start_time = time.time()
+    request_id = None
+    mcp_request_id = None
+    mcp_method = None
+
+    try:
+        # Extract request ID from context
+        if context and hasattr(context, "aws_request_id"):
+            request_id = context.aws_request_id
+
+        # Log incoming request with full details
+        log_lambda_request(logger, event, context, request_id)
+
+        # Parse MCP message from event if present
+        try:
+            # Check if this is an MCP protocol message
+            if isinstance(event, dict):
+                # Try to extract MCP message details
+                body = event.get("body")
+                if body:
+                    if isinstance(body, str):
+                        try:
+                            mcp_data = json.loads(body)
+                        except (json.JSONDecodeError, TypeError):
+                            mcp_data = None
+                    else:
+                        mcp_data = body
+                    
+                    if mcp_data and isinstance(mcp_data, dict):
+                        mcp_request_id = mcp_data.get("id")
+                        mcp_method = mcp_data.get("method")
+                        mcp_params = mcp_data.get("params")
+                        
+                        # Log MCP request message
+                        log_mcp_message(
+                            logger,
+                            message_type="request",
+                            method=mcp_method,
+                            request_id=mcp_request_id,
+                            params=mcp_params,
+                            lambda_request_id=request_id,
+                        )
+                        
+                        # Log processing status
+                        log_request_processing_status(
+                            logger,
+                            status="started",
+                            stage="mcp_message_received",
+                            request_id=request_id,
+                            details={
+                                "mcp_method": mcp_method,
+                                "mcp_request_id": mcp_request_id,
+                            },
+                        )
+                
+                # Also check direct event structure (for direct Lambda invocation)
+                if not mcp_method:
+                    mcp_method = event.get("method")
+                    mcp_request_id = event.get("id")
+                    mcp_params = event.get("params")
+                    
+                    if mcp_method:
+                        log_mcp_message(
+                            logger,
+                            message_type="request",
+                            method=mcp_method,
+                            request_id=mcp_request_id,
+                            params=mcp_params,
+                            lambda_request_id=request_id,
+                        )
+                        
+                        log_request_processing_status(
+                            logger,
+                            status="started",
+                            stage="mcp_message_received",
+                            request_id=request_id,
+                            details={
+                                "mcp_method": mcp_method,
+                                "mcp_request_id": mcp_request_id,
+                            },
+                        )
+        except Exception as parse_error:
+            logger.warning(
+                "Failed to parse MCP message from event",
+                extra={
+                    "component": "lambda_handler",
+                    "request_id": request_id,
+                    "error": str(parse_error),
+                    "event_keys": list(event.keys()) if isinstance(event, dict) else [],
+                },
+            )
+
+        # Log processing status: calling base handler
+        log_request_processing_status(
+            logger,
+            status="in_progress",
+            stage="calling_mcp_handler",
+            request_id=request_id,
+            details={"mcp_method": mcp_method},
+        )
+
+        # Call the base handler
+        handler_start = time.time()
+        response = _base_handler(event, context)
+        handler_duration_ms = (time.time() - handler_start) * 1000
+
+        # Log processing status: handler completed
+        log_request_processing_status(
+            logger,
+            status="completed",
+            stage="mcp_handler_executed",
+            request_id=request_id,
+            details={
+                "handler_duration_ms": handler_duration_ms,
+                "mcp_method": mcp_method,
+            },
+        )
+
+        # Parse MCP response if present
+        try:
+            if isinstance(response, dict):
+                response_body = response.get("body")
+                if response_body:
+                    if isinstance(response_body, str):
+                        try:
+                            mcp_response = json.loads(response_body)
+                        except (json.JSONDecodeError, TypeError):
+                            mcp_response = None
+                    else:
+                        mcp_response = response_body
+                    
+                    if mcp_response and isinstance(mcp_response, dict):
+                        mcp_result = mcp_response.get("result")
+                        mcp_error = mcp_response.get("error")
+                        mcp_response_id = mcp_response.get("id")
+                        
+                        # Log MCP response message
+                        log_mcp_message(
+                            logger,
+                            message_type="response",
+                            method=mcp_method,
+                            request_id=mcp_response_id or mcp_request_id,
+                            result=mcp_result,
+                            error=mcp_error,
+                            duration_ms=handler_duration_ms,
+                            lambda_request_id=request_id,
+                        )
+                
+                # Also check direct response structure
+                if isinstance(response, dict) and "result" in response:
+                    mcp_result = response.get("result")
+                    mcp_error = response.get("error")
+                    
+                    log_mcp_message(
+                        logger,
+                        message_type="response",
+                        method=mcp_method,
+                        request_id=mcp_request_id,
+                        result=mcp_result,
+                        error=mcp_error,
+                        duration_ms=handler_duration_ms,
+                        lambda_request_id=request_id,
+                    )
+        except Exception as parse_error:
+            logger.warning(
+                "Failed to parse MCP response",
+                extra={
+                    "component": "lambda_handler",
+                    "request_id": request_id,
+                    "error": str(parse_error),
+                },
+            )
+
+        # Calculate total duration
+        duration_ms = (time.time() - start_time) * 1000
+
+        # Extract status code from response
+        status_code = None
+        if isinstance(response, dict):
+            status_code = response.get("statusCode")
+
+        # Log final response with full details
+        log_lambda_response(logger, response, request_id, duration_ms, status_code)
+
+        # Log final processing status
+        log_request_processing_status(
+            logger,
+            status="completed",
+            stage="request_completed",
+            request_id=request_id,
+            details={
+                "total_duration_ms": duration_ms,
+                "status_code": status_code,
+                "mcp_method": mcp_method,
+            },
+        )
+
+        return response
+
+    except Exception as e:
+        # Calculate duration even on error
+        duration_ms = (time.time() - start_time) * 1000
+
+        # Log error with full details
+        log_lambda_error(logger, e, request_id, duration_ms, event)
+
+        # Log MCP error response if we have MCP context
+        if mcp_method or mcp_request_id:
+            try:
+                log_mcp_message(
+                    logger,
+                    message_type="response",
+                    method=mcp_method,
+                    request_id=mcp_request_id,
+                    error={
+                        "code": -32603,
+                        "message": str(e),
+                        "type": type(e).__name__,
+                    },
+                    duration_ms=duration_ms,
+                    lambda_request_id=request_id,
+                )
+            except Exception:
+                pass
+
+        # Log failed processing status
+        log_request_processing_status(
+            logger,
+            status="failed",
+            stage="request_processing",
+            request_id=request_id,
+            details={
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "duration_ms": duration_ms,
+                "mcp_method": mcp_method,
+            },
+        )
+
+        # Re-raise the exception so Lambda can handle it
+        raise
 
 
 # ============================================================================

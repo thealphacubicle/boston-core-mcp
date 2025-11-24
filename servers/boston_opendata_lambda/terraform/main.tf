@@ -71,6 +71,7 @@ resource "null_resource" "docker_build_and_push" {
   triggers = {
     dockerfile_hash     = filemd5("${path.module}/../Dockerfile")
     lambda_server_hash  = filemd5("${path.module}/../lambda_server.py")
+    logger_hash         = filemd5("${path.module}/../utils/logger.py")
     requirements_hash   = filemd5("${path.module}/../../../requirements.txt")
     repository_url      = aws_ecr_repository.boston_opendata_mcp.repository_url
     architecture        = var.lambda_architecture
