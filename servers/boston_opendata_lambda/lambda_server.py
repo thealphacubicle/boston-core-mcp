@@ -5,6 +5,7 @@ import asyncio
 import json
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -637,6 +638,116 @@ async def get_dataset_info(dataset_id: str) -> str:
             )
 
 
+def parse_date_string(date_str: str) -> Optional[datetime]:
+    """Parse various date string formats into datetime object.
+    
+    Supports formats like:
+    - ISO format: "2025-10-01", "2025-10-01T00:00:00", "2025-10-01T00:00:00+00:00"
+    - Common formats: "10/01/2025", "2025-10-01 00:00:00"
+    - With timezone: "2025-05-31 22:19:13+00"
+    """
+    if not date_str:
+        return None
+    
+    date_str = date_str.strip()
+    
+    # Handle timezone formats that strptime doesn't support directly
+    # Replace "+00" with "+00:00" for proper parsing
+    if date_str.endswith("+00") and not date_str.endswith("+00:00"):
+        date_str = date_str.replace("+00", "+00:00")
+    elif date_str.endswith("-00") and not date_str.endswith("-00:00"):
+        date_str = date_str.replace("-00", "-00:00")
+    
+    # Try ISO format first
+    formats = [
+        "%Y-%m-%dT%H:%M:%S%z",      # 2025-10-01T00:00:00+00:00
+        "%Y-%m-%dT%H:%M:%S",        # 2025-10-01T00:00:00
+        "%Y-%m-%d %H:%M:%S%z",      # 2025-05-31 22:19:13+00:00
+        "%Y-%m-%d %H:%M:%S.%f%z",   # 2025-05-31 22:19:13.123456+00:00
+        "%Y-%m-%d %H:%M:%S.%f",     # 2025-05-31 22:19:13.123456
+        "%Y-%m-%d %H:%M:%S",        # 2025-05-31 22:19:13
+        "%Y-%m-%d",                 # 2025-10-01
+        "%m/%d/%Y",                 # 10/01/2025
+        "%Y/%m/%d",                 # 2025/10/01
+    ]
+    
+    for fmt in formats:
+        try:
+            return datetime.strptime(date_str, fmt)
+        except ValueError:
+            continue
+    
+    return None
+
+
+def filter_records_by_date_range(
+    records: List[Dict[str, Any]],
+    date_field: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Filter records by date range client-side.
+    
+    Args:
+        records: List of records to filter
+        date_field: Name of the date field to filter on
+        start_date: Start date (inclusive), ISO format string or None
+        end_date: End date (inclusive), ISO format string or None
+    
+    Returns:
+        Filtered list of records
+    """
+    if not start_date and not end_date:
+        return records
+    
+    start_dt = parse_date_string(start_date) if start_date else None
+    end_dt = parse_date_string(end_date) if end_date else None
+    
+    if not start_dt and not end_dt:
+        return records
+    
+    # Normalize timezones - convert all to UTC-aware for consistent comparison
+    from datetime import timezone
+    
+    # Make filter dates timezone-aware (assume UTC if naive)
+    if start_dt and start_dt.tzinfo is None:
+        start_dt = start_dt.replace(tzinfo=timezone.utc)
+    elif start_dt:
+        start_dt = start_dt.astimezone(timezone.utc)
+    
+    if end_dt and end_dt.tzinfo is None:
+        end_dt = end_dt.replace(tzinfo=timezone.utc)
+    elif end_dt:
+        end_dt = end_dt.astimezone(timezone.utc)
+    
+    filtered = []
+    for record in records:
+        date_value = record.get(date_field)
+        if not date_value:
+            continue
+        
+        # Parse the record's date value
+        record_dt = parse_date_string(str(date_value))
+        if not record_dt:
+            continue
+        
+        # Convert record date to UTC-aware for comparison
+        if record_dt.tzinfo is None:
+            record_dt = record_dt.replace(tzinfo=timezone.utc)
+        else:
+            record_dt = record_dt.astimezone(timezone.utc)
+        
+        # Check if date is within range
+        if start_dt and record_dt < start_dt:
+            continue
+        if end_dt and record_dt > end_dt:
+            continue
+        
+        filtered.append(record)
+    
+    return filtered
+
+
 @engine.tool()
 async def query_datastore(
     resource_id: str,
@@ -646,6 +757,7 @@ async def query_datastore(
     filters: Optional[Dict[str, Any]] = None,
     sort: Optional[str] = None,
     fields: Optional[List[str]] = None,
+    date_range: Optional[Dict[str, str]] = None,
 ) -> str:
     """Query and retrieve actual data records from a DataStore resource.
 
@@ -701,6 +813,13 @@ async def query_datastore(
                Example: ["case_id", "open_date", "case_status"].
                Auto-correction: If field names don't match, function will try to find
                similar field names and use them automatically.
+        date_range: Filter by date range (optional). Format: {"field": "date_field_name", 
+                  "start_date": "2025-10-01", "end_date": "2025-10-31"}.
+                  ⚠️ Field name MUST match exactly from get_datastore_schema output.
+                  This performs client-side filtering after fetching records, so you may
+                  need to increase limit to get enough records to filter.
+                  Example: {"field": "dispatch_ts", "start_date": "2025-10-01", "end_date": "2025-10-31"}
+                  for "last month" queries. Only "start_date" or "end_date" is required.
 
     Returns:
         Actual data records with field values, total count, available fields, and
@@ -722,13 +841,16 @@ async def query_datastore(
         )
 
         # For date ranges (e.g., "this week", "last month"):
-        # Query without date filters, get recent records, filter client-side
+        # Use date_range parameter for client-side filtering
+        from datetime import datetime, timedelta
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=30)  # Last month
         data = query_datastore(
-            resource_id="254adca6-64ab-4c5c-9fc0-a6da622be185",
-            sort="open_date desc",  # Get most recent first
-            limit=100  # Get enough records to filter
+            resource_id="e4bfe397-6bfc-49c5-9367-c879fac7401d",
+            sort="dispatch_ts desc",  # Get most recent first
+            limit=1000,  # Get enough records to filter
+            date_range={"field": "dispatch_ts", "start_date": start_date.strftime("%Y-%m-%d"), "end_date": end_date.strftime("%Y-%m-%d")}
         )
-        # Then filter records where open_date is within your date range
     """
     start_time = time.time()
     tool_name = "query_datastore"
@@ -744,6 +866,7 @@ async def query_datastore(
             "has_filters": filters is not None,
             "has_sort": sort is not None,
             "has_fields": fields is not None,
+            "has_date_range": date_range is not None,
         },
     )
 
@@ -946,6 +1069,60 @@ async def query_datastore(
                 "field_count": len(fields_info),
             },
         )
+
+        # Apply client-side date range filtering if requested
+        if date_range:
+            date_field = date_range.get("field")
+            start_date = date_range.get("start_date")
+            end_date = date_range.get("end_date")
+            
+            if date_field:
+                # Validate date field exists
+                field_names = [f.get("id") for f in fields_info if f.get("id") != "_id"]
+                if date_field not in field_names:
+                    # Try to find similar field name
+                    date_field_corrected = None
+                    for field in field_names:
+                        if "date" in field.lower() or "time" in field.lower() or "ts" in field.lower():
+                            if date_field.lower() in field.lower() or field.lower() in date_field.lower():
+                                date_field_corrected = field
+                                break
+                    
+                    if date_field_corrected:
+                        logger.info(
+                            f"Date field name corrected: {date_field} → {date_field_corrected}",
+                            extra={"tool": tool_name, "resource_id": resource_id},
+                        )
+                        date_field = date_field_corrected
+                    else:
+                        logger.warning(
+                            f"Date field '{date_field}' not found in schema",
+                            extra={"tool": tool_name, "resource_id": resource_id, "available_fields": field_names},
+                        )
+                        return format_error_message(
+                            "Validation Error",
+                            f"Date field '{date_field}' not found. Available date/time fields: {', '.join([f for f in field_names if 'date' in f.lower() or 'time' in f.lower() or 'ts' in f.lower()])}"
+                        )
+                
+                original_count = len(records)
+                records = filter_records_by_date_range(records, date_field, start_date, end_date)
+                filtered_count = len(records)
+                
+                logger.info(
+                    f"Date range filtering applied",
+                    extra={
+                        "tool": tool_name,
+                        "resource_id": resource_id,
+                        "date_field": date_field,
+                        "start_date": start_date,
+                        "end_date": end_date,
+                        "original_count": original_count,
+                        "filtered_count": filtered_count,
+                    },
+                )
+                
+                # Update total to reflect filtered count
+                total = filtered_count
 
         if not records:
             logger.info(
