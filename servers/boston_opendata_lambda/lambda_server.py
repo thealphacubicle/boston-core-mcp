@@ -30,6 +30,8 @@ from .utils.exceptions import (
 from .utils.validators import (
     validate_tool_request,
     validate_pagination_params,
+    validate_datastore_query_fields,
+    validate_filter_value,
 )
 from .utils.logger import get_logger, setup_logging, log_tool_execution
 
@@ -566,6 +568,18 @@ async def query_datastore(
     final step - it returns actual data values. You MUST have a resource_id from
     get_dataset_info first (look for "Queryable Resources" in that output).
 
+    ⚠️ CRITICAL: Field names vary by resource! You MUST call get_datastore_schema
+    FIRST to get the exact field names before using filters, sort, or fields parameters.
+    Field names are case-sensitive and must match exactly (e.g., "open_date" vs "open_dt").
+    However, this function will automatically attempt to correct common field name mistakes
+    by finding similar field names in the schema.
+
+    Workflow:
+    1. Call get_dataset_info(dataset_id) to find queryable resource_ids
+    2. Call get_datastore_schema(resource_id) to get valid field names
+    3. Use those exact field names in query_datastore filters/sort/fields
+       (or let the function auto-correct if you make a typo)
+
     When to use: User asks for "actual data", "show me records", "get data where...",
     "filter by...", or wants to see examples/samples from a dataset.
 
@@ -579,15 +593,57 @@ async def query_datastore(
                queries, increase if user wants more.
         offset: Records to skip for pagination (default 0). Use with limit for pages.
         search_text: Full-text search across all fields (optional). Example: "broken".
-        filters: Filter by field values (optional). Format: {"field": "value"}.
-                Example: {"status": "open"}.
-        sort: Sort results (optional). Format: "field asc" or "field desc".
-             Example: "created_date desc".
-        fields: Specific fields to return (optional). Example: ["id", "title", "status"].
+        filters: Filter by field values (optional). Format: {"field_name": "value"}.
+                ⚠️ Field names MUST match exactly from get_datastore_schema output.
+                ⚠️ IMPORTANT: CKAN datastore_search only supports EXACT MATCH filters.
+                Range operators ($gte, $lte, $gt, $lt) are NOT supported.
+                Example: {"case_status": "Open", "assigned_department": "ISD"}.
+                For exact date filtering: {"open_date": "2025-01-01"}.
+                For date ranges (e.g., "this week", "last month", "between dates"):
+                Query WITHOUT date filters, use sort="date_field desc" to get recent
+                records, then filter the returned records client-side by checking if
+                dates fall within your desired range. Increase limit if needed to
+                ensure you get enough records to filter.
+                Auto-correction: If field name doesn't match, function will try to find
+                a similar field name and use it automatically.
+        sort: Sort results (optional). Format: "field_name asc" or "field_name desc".
+             ⚠️ Field name MUST match exactly from get_datastore_schema output.
+             Example: "open_date desc" or "case_id asc".
+             Auto-correction: If field name doesn't match, function will try to find
+             a similar field name and use it automatically.
+        fields: Specific fields to return (optional). ⚠️ Field names MUST match exactly
+               from get_datastore_schema output.
+               Example: ["case_id", "open_date", "case_status"].
+               Auto-correction: If field names don't match, function will try to find
+               similar field names and use them automatically.
 
     Returns:
         Actual data records with field values, total count, available fields, and
-        pagination info. Shows up to 20 records per query.
+        pagination info. Shows up to 20 records per query. If field name corrections
+        were made, they will be mentioned in the response.
+
+    Example workflow:
+        # Step 1: Get schema to see available fields
+        schema = get_datastore_schema("254adca6-64ab-4c5c-9fc0-a6da622be185")
+        # Returns: Fields like "case_id", "open_date", "case_status", etc.
+
+        # Step 2: Use exact field names from schema (or let auto-correction help)
+        # Note: Only exact match filters are supported (no $gte, $lte, etc.)
+        data = query_datastore(
+            resource_id="254adca6-64ab-4c5c-9fc0-a6da622be185",
+            filters={"case_status": "Open"},
+            sort="open_date desc",
+            limit=10
+        )
+
+        # For date ranges (e.g., "this week", "last month"):
+        # Query without date filters, get recent records, filter client-side
+        data = query_datastore(
+            resource_id="254adca6-64ab-4c5c-9fc0-a6da622be185",
+            sort="open_date desc",  # Get most recent first
+            limit=100  # Get enough records to filter
+        )
+        # Then filter records where open_date is within your date range
     """
     start_time = time.time()
     tool_name = "query_datastore"
@@ -628,6 +684,133 @@ async def query_datastore(
             extra={"tool": tool_name, "limit": limit, "offset": offset},
         )
 
+        # Validate filter formats first (before schema fetch, as this is format validation)
+        filter_format_errors = []
+        if filters:
+            for field_name, value in filters.items():
+                is_valid, error_msg = validate_filter_value(value, field_name)
+                if not is_valid and error_msg:
+                    filter_format_errors.append(error_msg)
+
+        if filter_format_errors:
+            error_msg = " ".join(filter_format_errors)
+            logger.warning(
+                f"Unsupported filter format detected for {tool_name}",
+                extra={
+                    "tool": tool_name,
+                    "resource_id": resource_id,
+                    "filter_errors": filter_format_errors,
+                },
+            )
+            return format_error_message("Validation Error", error_msg)
+
+        # Fetch schema to validate and correct field names
+        client_id = f"req_{int(time.time() * 1000)}"
+        valid_field_names = []
+        corrections_made = {}
+        field_errors = []
+
+        try:
+            schema_result = await ckan_api_call(
+                "datastore_search",
+                {"resource_id": resource_id, "limit": 0},
+                client_id=client_id,
+            )
+            schema_fields = schema_result.get("fields", [])
+            valid_field_names = [
+                f.get("id") for f in schema_fields if f.get("id") != "_id"
+            ]
+
+            logger.debug(
+                f"Schema fetched for field validation",
+                extra={
+                    "tool": tool_name,
+                    "resource_id": resource_id,
+                    "field_count": len(valid_field_names),
+                },
+            )
+
+            # Validate and correct field names
+            if valid_field_names and (filters or sort or fields):
+                (
+                    corrected_filters,
+                    corrected_sort,
+                    corrected_fields,
+                    corrections,
+                    errors,
+                    filter_format_errors,
+                ) = validate_datastore_query_fields(
+                    filters, sort, fields, valid_field_names
+                )
+
+                corrections_made = corrections
+                field_errors = errors
+
+                # Check for filter format errors first (unsupported operators, etc.)
+                if filter_format_errors:
+                    error_msg = " ".join(filter_format_errors)
+                    logger.warning(
+                        f"Unsupported filter format detected for {tool_name}",
+                        extra={
+                            "tool": tool_name,
+                            "resource_id": resource_id,
+                            "filter_errors": filter_format_errors,
+                        },
+                    )
+                    return format_error_message("Validation Error", error_msg)
+
+                # Use corrected values
+                if corrected_filters is not None:
+                    filters = corrected_filters
+                if corrected_sort is not None:
+                    sort = corrected_sort
+                if corrected_fields is not None:
+                    fields = corrected_fields
+
+                # Log corrections
+                if corrections_made:
+                    logger.info(
+                        f"Field name corrections made for {tool_name}",
+                        extra={
+                            "tool": tool_name,
+                            "resource_id": resource_id,
+                            "corrections": corrections_made,
+                        },
+                    )
+
+                # If there are uncorrectable errors, return helpful error message
+                if field_errors:
+                    field_list = ", ".join(sorted(valid_field_names))
+                    error_msg = (
+                        f"Invalid field name(s): {', '.join(field_errors)}. "
+                        f"Valid fields for this resource are: {field_list}. "
+                    )
+                    if corrections_made:
+                        error_msg += (
+                            f"Note: Some field names were auto-corrected: {corrections_made}. "
+                        )
+                    error_msg += (
+                        "Please call get_datastore_schema first to see all available fields."
+                    )
+                    logger.warning(
+                        f"Invalid field names detected for {tool_name}",
+                        extra={
+                            "tool": tool_name,
+                            "resource_id": resource_id,
+                            "invalid_fields": field_errors,
+                            "valid_fields": valid_field_names,
+                            "corrections": corrections_made,
+                        },
+                    )
+                    return format_error_message("Validation Error", error_msg)
+
+        except Exception as e:
+            # If schema fetch fails, log warning but continue (will fail at API call if fields are wrong)
+            logger.warning(
+                f"Could not fetch schema for field validation: {e}",
+                extra={"tool": tool_name, "resource_id": resource_id},
+            )
+
         # Build query parameters
         params = {"resource_id": resource_id, "limit": limit, "offset": offset}
         if search_text:
@@ -639,8 +822,7 @@ async def query_datastore(
         if fields:
             params["fields"] = ",".join(fields)
 
-        # Make API call
-        client_id = f"req_{int(time.time() * 1000)}"
+        # Make API call (reuse client_id from schema fetch)
         logger.debug(
             f"Making CKAN API call for {tool_name}",
             extra={
@@ -679,6 +861,13 @@ async def query_datastore(
         output = format_api_response_summary(
             total, len(records), offset, total > (offset + limit)
         )
+
+        # Add note about field corrections if any were made
+        if corrections_made:
+            correction_list = ", ".join(
+                [f"'{k}' → '{v}'" for k, v in corrections_made.items()]
+            )
+            output += f"✅ **Field name corrections:** {correction_list}\n\n"
 
         field_names = [f.get("id") for f in fields_info if f.get("id") != "_id"]
         output += f"**Fields:** {', '.join(field_names[:10])}"
@@ -773,12 +962,20 @@ async def query_datastore(
 async def get_datastore_schema(resource_id: str) -> str:
     """Get the schema (field names and data types) for a DataStore resource.
 
+    ⚠️ REQUIRED BEFORE query_datastore: You MUST call this function FIRST to get
+    the exact field names before using filters, sort, or fields in query_datastore.
+    Field names are case-sensitive and vary by resource - guessing will cause errors.
+    While query_datastore will attempt to auto-correct field name mistakes, it's
+    best practice to use the exact field names from this function.
+
     Use this BEFORE query_datastore to understand what fields are available and
     their data types. This helps you know what field names to use in filters,
     sort, and fields parameters.
 
-    When to use: User asks "what fields are available?", "what columns does this have?",
-    or you need to know field names before filtering/sorting data.
+    When to use:
+    - ALWAYS before calling query_datastore with filters/sort/fields
+    - User asks "what fields are available?", "what columns does this have?",
+    - You need to know field names before filtering/sorting data
 
     Args:
         resource_id: Resource ID (UUID) from get_dataset_info's "Queryable Resources".
@@ -786,7 +983,13 @@ async def get_datastore_schema(resource_id: str) -> str:
 
     Returns:
         Complete list of field names with their data types (text, timestamp, numeric,
-        etc.). Use these field names with query_datastore.
+        etc.). Use these EXACT field names with query_datastore - copy them exactly.
+        Field names are case-sensitive and must match exactly.
+
+    Example:
+        schema = get_datastore_schema("254adca6-64ab-4c5c-9fc0-a6da622be185")
+        # Returns field list like: case_id, open_date, case_status, etc.
+        # Use these exact names in query_datastore filters/sort/fields
     """
     start_time = time.time()
     tool_name = "get_datastore_schema"
