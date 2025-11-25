@@ -1,16 +1,12 @@
 # Boston Core MCP
 
-Boston Core MCP is a collection of Model Context Protocol (MCP) servers created by the City of Boston Department of Innovation and Technology (DoIT). These servers give large language models and agentic tools safe, read-only access to trusted data so that staff, residents, and partners can explore civic information in conversational workflows.
+Boston Core MCP is a Model Context Protocol (MCP) server created by the City of Boston Department of Innovation and Technology (DoIT). The server gives large language models and agentic tools safe, read-only access to Boston's open data portal so that staff, residents, and partners can explore civic information in conversational workflows.
 
 ## Overview
 
-This repository now includes three MCP servers:
+This repository includes the Boston Open Data MCP server, which wraps the City's CKAN instance (`https://data.boston.gov`) for dataset discovery and DataStore queries. The server provides safe, read-only access to Boston's open data portal through a set of well-defined tools.
 
-- Boston Open Data – wraps the City's CKAN instance for dataset discovery and DataStore queries.
-- MBTA – integrates the MBTA v3 API for real-time transit data and metadata.
-- U.S. Census – exposes selected Census Bureau endpoints (ACS and 2020 Decennial PL).
-
-Each toolset is designed with clear contracts, conservative limits, and descriptive outputs to make integrations predictable for AI assistants.
+The toolset is designed with clear contracts, conservative limits, and descriptive outputs to make integrations predictable for AI assistants.
 
 Key characteristics:
 
@@ -18,35 +14,52 @@ Key characteristics:
 - **LLM-friendly outputs** – responses formatted for natural-language assistants and autonomous agents.
 - **Minimal dependencies** – lightweight Python stack keeps deployment straightforward.
 
-## Included Servers
+## Included Server
 
-| Server | Description | Deployment Options |
-| --- | --- | --- |
-| `servers/boston_opendata` | Exposes Boston's CKAN portal (`https://data.boston.gov`) through MCP tools for dataset discovery and DataStore queries. | stdio (local), **Lambda (production)** |
-| `servers/boston_opendata_lambda` | Lambda-compatible version using MCPEngine for serverless AWS deployment. Same functionality as stdio version. | **AWS Lambda only** |
-| `servers/mbta_server` | MBTA v3 API: predictions, service alerts, stop search, routes, and schedules. Optional `MBTA_API_KEY` for higher rate limits. | stdio (local) |
-| `servers/census_server` | U.S. Census Bureau APIs: ACS 5-year and 2020 Decennial PL tables, variable search, and geography listings. | stdio (local) |
+| Server                           | Description                                                                                                                                                                                    | Deployment Options                                         |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `servers/boston_opendata_lambda` | Exposes Boston's CKAN portal (`https://data.boston.gov`) through MCP tools for dataset discovery and DataStore queries. Uses MCPEngine for HTTP-based communication and AWS Lambda deployment. | **AWS Lambda (production)**, Local testing via HTTP server |
 
-## Running Locally (stdio)
+### Available Tools
 
-From the repository root, run any server as a Python module:
+The Boston OpenData MCP server provides five tools:
 
+1. **`search_datasets`** - Search for datasets using keywords (e.g., "311", "crime", "parking")
+2. **`list_all_datasets`** - List all available datasets on the portal
+3. **`get_dataset_info`** - Get detailed metadata and resources for a specific dataset
+4. **`query_datastore`** - Query actual data records from DataStore resources with filtering, sorting, and pagination
+5. **`get_datastore_schema`** - Get schema information (field names and data types) for DataStore resources
+
+## Running Locally (Testing)
+
+The server can be run locally for testing using the HTTP server mode:
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the local HTTP server
+python -m servers.boston_opendata_lambda.lambda_server
 ```
-python -m servers.boston_opendata.main
-python -m servers.mbta_server.main
-python -m servers.census_server.main
+
+The server will start on `http://localhost:8000`. For connecting to Claude Desktop, use the MCPEngine proxy:
+
+```bash
+# In a separate terminal, start the proxy
+mcpengine proxy boston-opendata-lambda http://localhost:8000/mcp --mode http --claude
 ```
 
-Notes:
+**Notes:**
 
-- Python 3.10+ is recommended. Install dependencies with `pip install -r requirements.txt`.
-- For the MBTA server, set an API key (optional but recommended): `export MBTA_API_KEY="your-key"`.
+- Python 3.10+ is required
+- Install MCPEngine: `pip install mcpengine`
+- See [`servers/boston_opendata_lambda/README.md`](servers/boston_opendata_lambda/README.md) for detailed local testing instructions
 
 ## Deployment Options
 
-### Local Development (stdio)
+### Local Development
 
-All servers can run locally using stdio communication, ideal for development and testing.
+The server can run locally using HTTP mode for testing and development. See the [Running Locally](#running-locally-testing) section above.
 
 ### AWS Lambda Deployment (Production)
 
@@ -74,47 +87,38 @@ terraform apply
 
 ## Connect to Claude Desktop
 
-Claude Desktop can launch multiple MCP servers. Use module execution (`-m`) to avoid relative import issues and set `PYTHONPATH` to your repo root.
+### Production (Lambda Deployment)
 
-Example `claude_desktop_config.json` snippet:
+Connect to the deployed Lambda server using MCPEngine proxy:
 
-```
-{
-  "mcpServers": {
-    "boston-opendata": {
-      "command": "python",
-      "args": ["-m", "servers.boston_opendata.main"],
-      "env": { "PYTHONPATH": "/absolute/path/to/your/boston-core-mcp" }
-    },
-    "boston-opendata-lambda": {
-      "command": "mcpengine",
-      "args": ["proxy", "boston-opendata-lambda", "https://kdbjj7ebdewlcy24bt4wbf3uju0tjgdf.lambda-url.us-east-1.on.aws", "--mode", "http", "--claude"],
-      "env": {}
-    },
-    "mbta-server": {
-      "command": "python",
-      "args": ["-m", "servers.mbta_server.main"],
-      "env": {
-        "PYTHONPATH": "/absolute/path/to/your/boston-core-mcp",
-        "MBTA_API_KEY": "your-key-if-available"
-      }
-    },
-    "census-server": {
-      "command": "python",
-      "args": ["-m", "servers.census_server.main"],
-      "env": { "PYTHONPATH": "/absolute/path/to/your/boston-core-mcp" }
-    }
-  }
-}
+```bash
+mcpengine proxy boston-opendata-lambda https://kdbjj7ebdewlcy24bt4wbf3uju0tjgdf.lambda-url.us-east-1.on.aws --mode http --claude
 ```
 
-After editing, fully restart Claude Desktop and ask it to list available tools. You should see tools from all servers.
+**Note:** Docker Desktop must be running for the proxy to work. See [`docs/LAMBDA_QUICKSTART.md`](docs/LAMBDA_QUICKSTART.md) for detailed setup instructions.
+
+### Local Development
+
+For local testing, run the server and proxy in separate terminals:
+
+**Terminal 1:**
+
+```bash
+python -m servers.boston_opendata_lambda.lambda_server
+```
+
+**Terminal 2:**
+
+```bash
+mcpengine proxy boston-opendata-lambda http://localhost:8000/mcp --mode http --claude
+```
+
+After starting the proxy, restart Claude Desktop and ask it to list available tools. You should see the five Boston OpenData tools available.
 
 ## Repository Structure
 
 ```
-servers/                      # MCP server packages (one per service)
-  boston_opendata/            # Boston Open Data MCP server (stdio version)
+servers/                      # MCP server package
   boston_opendata_lambda/     # Boston Open Data MCP server (Lambda/production)
     terraform/                 # Infrastructure as Code for AWS deployment
       main.tf                  # Terraform configuration (ECR, Lambda, IAM, etc.)
@@ -122,14 +126,30 @@ servers/                      # MCP server packages (one per service)
       outputs.tf               # Deployment outputs
       AWS_PERMISSIONS.md       # Required AWS IAM permissions
       README.md                # Terraform deployment guide
-    lambda_server.py          # MCPEngine-based Lambda handler
+    lambda_server.py          # MCPEngine-based Lambda handler and local HTTP server
+    ckan.py                   # CKAN API client with retry logic and error handling
+    config.py                 # Configuration management (Pydantic settings)
     Dockerfile                # Container image definition
-  mbta_server/                # MBTA MCP server implementation
-  census_server/              # Census MCP server implementation
+    build.sh                  # Build script for Docker image
+    utils/                    # Utility modules
+      circuit_breaker.py      # Circuit breaker implementation
+      exceptions.py           # Custom exception types
+      formatters.py           # Response formatting utilities
+      logger.py               # Structured logging setup
+      rate_limiter.py         # Rate limiting implementation
+      validators.py           # Input validation helpers
+    tests/                    # Test suite
+      test_date_range.py      # Date range filtering tests
+      test_local.py           # Local server tests
+    README.md                 # Server-specific documentation
+    QUICKSTART.md             # Quick start guide for this server
 docs/                         # Project documentation
-  QUICKSTART.md              # Quick start guide
+  QUICKSTART.md              # Quick start guide (legacy)
+  LAMBDA_QUICKSTART.md       # Lambda connection quick start
+  LAMBDA_DEPLOYMENT.md       # Lambda deployment guide
   DEVELOPMENT.md             # Development notes
-requirements.txt             # Python dependencies shared across servers
+requirements.txt             # Python dependencies
+pyproject.toml               # Project metadata and dependencies
 LICENSE                      # Project license (MIT)
 CONTRIBUTORS.md              # Acknowledgements and contribution guidelines
 ```
@@ -137,15 +157,18 @@ CONTRIBUTORS.md              # Acknowledgements and contribution guidelines
 ## Documentation
 
 ### Getting Started
+
 - **Quick Start (Lambda):** [`docs/LAMBDA_QUICKSTART.md`](docs/LAMBDA_QUICKSTART.md) – Connect Claude Desktop to the deployed Lambda server in minutes
-- **Local Setup:** [`docs/QUICKSTART.md`](docs/QUICKSTART.md) – Install and run servers locally (stdio version)
+- **Server Documentation:** [`servers/boston_opendata_lambda/README.md`](servers/boston_opendata_lambda/README.md) – Detailed server documentation and local testing guide
 
 ### Deployment & Development
+
 - **Lambda Deployment Guide:** [`docs/LAMBDA_DEPLOYMENT.md`](docs/LAMBDA_DEPLOYMENT.md) – Complete guide for Lambda deployment and local development
 - **Terraform Infrastructure:** [`servers/boston_opendata_lambda/terraform/README.md`](servers/boston_opendata_lambda/terraform/README.md) – Step-by-step AWS infrastructure deployment
 - **AWS Permissions:** [`servers/boston_opendata_lambda/terraform/AWS_PERMISSIONS.md`](servers/boston_opendata_lambda/terraform/AWS_PERMISSIONS.md) – Required IAM permissions for Terraform deployment
 
 ### Additional Resources
+
 - **Development Notes:** [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) – Architecture, design decisions, and roadmap
 
 ## Infrastructure & DevOps
@@ -161,6 +184,7 @@ The Boston OpenData Lambda server includes production-ready Terraform scripts th
 - **CloudWatch Log Groups**: Centralized logging with configurable retention
 
 **Key Features:**
+
 - ✅ Validated and tested Terraform configuration
 - ✅ Supports both ARM64 (cost-effective) and x86_64 architectures
 - ✅ Optional X-Ray tracing for distributed debugging
@@ -168,6 +192,7 @@ The Boston OpenData Lambda server includes production-ready Terraform scripts th
 - ✅ Comprehensive security with IAM best practices
 
 **Recent Improvements:**
+
 - Fixed ECR lifecycle policy configuration for AWS provider v5.0+
 - Added conditional X-Ray permissions when tracing is enabled
 - Added Lambda Function URL invoke permissions for public access
