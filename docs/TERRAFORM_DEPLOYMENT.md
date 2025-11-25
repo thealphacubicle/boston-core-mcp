@@ -1,13 +1,13 @@
-# Terraform Deployment for Boston OpenData MCP Lambda Server
+# Terraform Deployment Guide
 
-This directory contains Terraform configuration files to deploy the Boston OpenData MCP server to AWS Lambda.
+This guide covers deploying the Boston OpenData MCP server to AWS Lambda using Terraform.
 
 ## Overview
 
 Terraform automates the entire deployment process in a single command:
 
 - **ECR Repository**: Stores Docker container images
-- **Docker Build & Push**: Automatically builds and pushes your Docker image (no manual steps!)
+- **Docker Build & Push**: Automatically builds and pushes your Docker image
 - **Lambda Function**: Runs your serverless code
 - **IAM Role**: Permissions for Lambda to execute and log
 - **Function URL**: HTTPS endpoint to access the server
@@ -29,11 +29,6 @@ Before you begin, ensure you have:
 2. **AWS CLI** installed and configured
 
    ```bash
-   # Install AWS CLI (if not already installed)
-   # macOS: brew install awscli
-   # Linux: sudo apt-get install awscli
-   # Or download from: https://aws.amazon.com/cli/
-
    # Configure with your credentials
    aws configure
    # Enter your Access Key ID
@@ -56,12 +51,10 @@ Before you begin, ensure you have:
    ```bash
    # Verify Docker is installed and running
    docker ps
-   
-   # Docker is used automatically by Terraform to build and push images
-   # No manual Docker commands needed!
    ```
 
 5. **Verify AWS Access**
+
    ```bash
    aws sts get-caller-identity
    # Should show your AWS account ID and user
@@ -114,7 +107,7 @@ Review the output:
 - Check the region and resource names are correct
 - Look for any warnings
 
-### Step 4: Deploy Everything (One Command!)
+### Step 4: Deploy Everything
 
 Deploy all resources including automatic Docker build and push:
 
@@ -168,9 +161,6 @@ curl $FUNCTION_URL
 curl -X POST ${FUNCTION_URL}mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
-
-# Check CloudWatch logs
-aws logs tail /aws/lambda/boston-opendata-mcp --follow
 ```
 
 ### Step 7: Connect from Claude Desktop
@@ -196,63 +186,25 @@ terraform/
 ├── outputs.tf                  # What Terraform shows after creation
 ├── terraform.tfvars.example    # Template for your configuration
 ├── terraform.tfvars            # YOUR configuration (not in git)
-└── README.md                   # This file
+└── .terraform/                 # Terraform state (created by terraform init)
 ```
-
-## Manual Deployment (Alternative to Quick Start)
-
-If you prefer step-by-step manual control:
-
-### 1. Configure
-
-```bash
-cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars
-```
-
-### 2. Initialize
-
-```bash
-terraform init
-```
-
-### 3. Plan
-
-```bash
-terraform plan
-# Review what will be created
-```
-
-### 4. Apply
-
-```bash
-terraform apply
-# Type 'yes' when prompted
-```
-
-### 5. Get Outputs
-
-```bash
-terraform output
-# Shows: ecr_repository_url, lambda_function_name, function_url
-```
-
-**Note**: The Docker image is automatically built and pushed during `terraform apply`. No manual steps needed!
 
 ## Updating After Code Changes
 
 When you make changes to your Python code:
 
 1. **Run `terraform apply`** - Terraform automatically detects code changes and rebuilds the Docker image
-   
+
    ```bash
    terraform apply
    ```
-   
+
    The Docker image will be rebuilt if any of these files change:
+
    - `Dockerfile`
    - `lambda_server.py`
    - `requirements.txt`
+   - Files in `utils/` directory
 
 2. **That's it!** Terraform automatically:
    - Rebuilds the Docker image
@@ -261,7 +213,7 @@ When you make changes to your Python code:
 
 You do NOT need to manually build or push Docker images anymore.
 
-### Updating Infrastructure (Timeout, Memory, Environment Variables)
+### Updating Infrastructure Settings
 
 If you change infrastructure settings in `terraform.tfvars`:
 
@@ -372,7 +324,6 @@ Or view in AWS Console:
 
 - Change architecture in `terraform.tfvars`: `lambda_architecture = "x86_64"`
 - Re-run `terraform apply`
-- Terraform will automatically use the correct platform
 
 **Error: "failed to build: resolve : lstat servers: no such file or directory"**
 
@@ -385,12 +336,10 @@ Or view in AWS Console:
 
 - Check CloudWatch logs for details
 - Verify Docker image was built and pushed (check Terraform output during apply)
-- The image is automatically built/pushed during `terraform apply`, so if it succeeded, the image should be available
 
 **Error: "Source image does not exist"**
 
-- This shouldn't happen with automated builds
-- If it occurs, re-run `terraform apply` - it will rebuild and push the image
+- Re-run `terraform apply` - it will rebuild and push the image
 
 **Timeout errors**
 
@@ -401,20 +350,6 @@ Or view in AWS Console:
 
 - Increase `lambda_memory_size` in terraform.tfvars
 - Re-run `terraform apply`
-
-### MCPEngine Proxy Errors
-
-**Cannot connect to Function URL**
-
-- Verify Function URL is correct (from `terraform output`)
-- Check Function URL is enabled (should be automatic)
-- Test with `curl` first
-
-**Tools not appearing in Claude Desktop**
-
-- Ensure proxy is running
-- Restart Claude Desktop
-- Check proxy terminal for errors
 
 ## Cleanup (Destroying Resources)
 
@@ -491,13 +426,6 @@ For typical usage (moderate traffic):
 - [ECR Documentation](https://docs.aws.amazon.com/ecr/)
 - [MCPEngine Documentation](https://www.featureform.com/post/deploy-mcp-on-aws-lambda-with-mcpengine)
 
-## Getting Help
-
-1. Check CloudWatch logs for error messages
-2. Review Terraform plan output for configuration issues
-3. Verify AWS permissions and credentials
-4. Test with `curl` before using MCPEngine proxy
-
 ## Next Steps
 
 After successful deployment:
@@ -506,3 +434,4 @@ After successful deployment:
 - Set up CloudWatch alarms for errors
 - Consider adding authentication (AWS_IAM) for production
 - Document your Function URL for team members
+- Set up CI/CD: See [CI/CD Guide](CI_CD_GUIDE.md)

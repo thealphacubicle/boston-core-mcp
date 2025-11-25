@@ -216,7 +216,7 @@ The Lambda version reuses several components from the stdio server:
 
 For detailed deployment instructions using Terraform, see:
 
-- [Terraform Deployment Guide](../servers/boston_opendata_lambda/terraform/README.md)
+- [Terraform Deployment Guide](TERRAFORM_DEPLOYMENT.md)
 - [AWS Permissions Required](../servers/boston_opendata_lambda/terraform/AWS_PERMISSIONS.md)
 
 ### Quick Deployment Overview

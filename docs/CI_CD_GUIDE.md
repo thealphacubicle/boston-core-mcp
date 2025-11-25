@@ -338,8 +338,8 @@ terraform plan  # Review plan locally
 ## Related Documentation
 
 - [Lambda Deployment Guide](./LAMBDA_DEPLOYMENT.md) - Detailed Lambda deployment instructions
-- [Terraform README](../servers/boston_opendata_lambda/terraform/README.md) - Terraform-specific documentation
-- [Workflows Quick Reference](../.github/workflows/README.md) - Quick workflow reference
+- [Terraform Deployment Guide](TERRAFORM_DEPLOYMENT.md) - Terraform-specific documentation
+- [Workflows Quick Reference](WORKFLOWS.md) - Quick workflow reference
 
 ## Support
 
