@@ -141,6 +141,9 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -189,9 +192,16 @@ jobs:
           fi
           
           # Import CloudWatch log group if it exists
-          if aws logs describe-log-groups --log-group-name "$LOG_GROUP" --region "$REGION" &>/dev/null; then
+          LOG_EXISTS=$(aws logs describe-log-groups --log-group-name-prefix "$LOG_GROUP" --region "$REGION" --query "logGroups[?logGroupName=='$LOG_GROUP'].logGroupName" --output text 2>/dev/null || echo "")
+          if [ -n "$LOG_EXISTS" ] && [ "$LOG_EXISTS" == "$LOG_GROUP" ]; then
             echo "CloudWatch log group exists, attempting import..."
-            terraform import aws_cloudwatch_log_group.lambda_logs "$LOG_GROUP" 2>&1 || echo "Log group already in state or import failed"
+            terraform import aws_cloudwatch_log_group.lambda_logs "$LOG_GROUP" 2>&1 | tee /tmp/import_log.txt || {
+              if grep -q "already managed" /tmp/import_log.txt 2>/dev/null || grep -q "Resource already managed" /tmp/import_log.txt 2>/dev/null; then
+                echo "Log group already in state"
+              else
+                echo "Log group import failed, but continuing..."
+              fi
+            }
           else
             echo "CloudWatch log group does not exist, skipping import"
           fi
@@ -199,6 +209,10 @@ jobs:
           # Refresh state after imports
           echo "Refreshing Terraform state..."
           terraform refresh -no-color || true
+          
+          # Show current state to verify imports
+          echo "Current Terraform state:"
+          terraform state list || echo "No resources in state yet"
 
       - name: Terraform Apply
         working-directory: servers/boston_opendata_lambda/terraform

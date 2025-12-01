@@ -91,18 +91,42 @@ resource "null_resource" "docker_build_and_push" {
       REPO_URL="${aws_ecr_repository.boston_opendata_mcp.repository_url}"
       AWS_REGION="${var.aws_region}"
       ARCH="${var.lambda_architecture == "arm64" ? "arm64" : "amd64"}"
+      PLATFORM="linux/$ARCH"
       
       echo "Logging into ECR..."
       aws ecr get-login-password --region $AWS_REGION | \
         docker login --username AWS --password-stdin $REPO_URL
       
-      echo "Building Docker image for platform linux/$ARCH..."
+      # Check if we need buildx for cross-platform builds
+      HOST_ARCH=$(uname -m)
+      NEED_BUILDX=false
+      if [[ "$PLATFORM" == "linux/arm64" && "$HOST_ARCH" != "arm64" && "$HOST_ARCH" != "aarch64" ]]; then
+        NEED_BUILDX=true
+        echo "Cross-platform build detected. Setting up Docker buildx..."
+        docker buildx create --use --name multiarch 2>/dev/null || docker buildx use multiarch || true
+      fi
+      
+      echo "Building Docker image for platform $PLATFORM..."
       cd ${path.module}/../../..
-      docker build \
-        --platform linux/$ARCH \
-        --provenance=false \
-        -t ${var.ecr_repository_name}:latest \
-        -f servers/boston_opendata_lambda/Dockerfile .
+      
+      if [ "$NEED_BUILDX" = true ]; then
+        # Use buildx for cross-platform builds
+        docker buildx build \
+          --platform $PLATFORM \
+          --provenance=false \
+          -t ${var.ecr_repository_name}:latest \
+          -f servers/boston_opendata_lambda/Dockerfile \
+          --load \
+          .
+      else
+        # Standard build (native platform)
+        docker build \
+          --platform $PLATFORM \
+          --provenance=false \
+          -t ${var.ecr_repository_name}:latest \
+          -f servers/boston_opendata_lambda/Dockerfile \
+          .
+      fi
       
       echo "Tagging image for ECR..."
       docker tag ${var.ecr_repository_name}:latest $REPO_URL:latest
