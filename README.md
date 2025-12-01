@@ -144,6 +144,4 @@ This project is maintained by the City of Boston Department of Innovation and Te
 
 Srihari Raman & Pradhu Balamurugan
 
----
-
-**Built with ❤️ by the City of Boston DoIT team**
+## **Built with ❤️ by the City of Boston DoIT team**
