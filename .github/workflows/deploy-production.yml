@@ -115,7 +115,7 @@ jobs:
           terraform plan -no-color -out=tfplan
 
       - name: Upload Terraform Plan
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: tfplan
           path: servers/boston_opendata_lambda/terraform/tfplan
@@ -148,7 +148,7 @@ jobs:
           terraform_wrapper: false
 
       - name: Download Terraform Plan
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: tfplan
           path: servers/boston_opendata_lambda/terraform
