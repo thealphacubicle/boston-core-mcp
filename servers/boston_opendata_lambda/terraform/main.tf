@@ -98,18 +98,20 @@ resource "null_resource" "docker_build_and_push" {
         docker login --username AWS --password-stdin $REPO_URL
       
       # Check if we need buildx for cross-platform builds
+      # Use POSIX-compliant syntax for shell compatibility
       HOST_ARCH=$(uname -m)
       NEED_BUILDX=false
-      if [[ "$PLATFORM" == "linux/arm64" && "$HOST_ARCH" != "arm64" && "$HOST_ARCH" != "aarch64" ]]; then
+      if [ "$PLATFORM" = "linux/arm64" ] && [ "$HOST_ARCH" != "arm64" ] && [ "$HOST_ARCH" != "aarch64" ]; then
         NEED_BUILDX=true
         echo "Cross-platform build detected. Setting up Docker buildx..."
         docker buildx create --use --name multiarch 2>/dev/null || docker buildx use multiarch || true
+        docker buildx inspect --bootstrap || true
       fi
       
       echo "Building Docker image for platform $PLATFORM..."
       cd ${path.module}/../../..
       
-      if [ "$NEED_BUILDX" = true ]; then
+      if [ "$NEED_BUILDX" = "true" ]; then
         # Use buildx for cross-platform builds
         docker buildx build \
           --platform $PLATFORM \
@@ -248,5 +250,14 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   retention_in_days = var.log_retention_days
 
   tags = var.tags
+
+  # Handle existing log groups gracefully
+  lifecycle {
+    create_before_destroy = false
+    ignore_changes = [
+      # Ignore changes to tags if they're managed outside Terraform
+      tags,
+    ]
+  }
 }
 
