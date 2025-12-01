@@ -34,7 +34,7 @@ from .utils.exceptions import (
     ResourceNotFoundError,
     ValidationError,
 )
-from .utils.logger import get_logger, log_api_call
+from .utils.logger import get_logger, log_api_call, sanitize_for_logging
 from .utils.circuit_breaker import ckan_circuit_breaker
 from .utils.rate_limiter import rate_limiter
 
@@ -118,8 +118,22 @@ def _is_retryable_exception(exception: Exception) -> bool:
 async def _make_http_request(
     client: httpx.AsyncClient, url: str, params: Dict[str, Any], method: str = "GET"
 ) -> httpx.Response:
-    """Make an HTTP request with retry logic."""
+    """Make an HTTP request with retry logic and detailed logging."""
     start_time = time.time()
+    logger = get_logger("ckan")
+    
+    # Log request details
+    logger.debug(
+        "Making HTTP request to CKAN API",
+        extra={
+            "component": "ckan_client",
+            "operation": f"HTTP_{method}",
+            "url": url,
+            "method": method,
+            "params": sanitize_for_logging(params, max_size=5000),
+            "params_size_bytes": len(str(params).encode("utf-8")),
+        },
+    )
 
     try:
         if method == "GET":
@@ -127,44 +141,147 @@ async def _make_http_request(
         else:
             response = await client.post(url, json=params)
 
-        # Check response size
+        duration_ms = (time.time() - start_time) * 1000
+        
+        # Extract response details
+        response_headers = dict(response.headers)
         content_length = response.headers.get("content-length")
+        response_size = int(content_length) if content_length else len(response.content)
+        
+        # Check response size
         if content_length and int(content_length) > MAX_RESPONSE_SIZE:
+            logger.error(
+                "Response too large",
+                extra={
+                    "component": "ckan_client",
+                    "operation": f"HTTP_{method}",
+                    "url": url,
+                    "response_size_bytes": response_size,
+                    "max_size_bytes": MAX_RESPONSE_SIZE,
+                    "status_code": response.status_code,
+                },
+            )
             raise APIError(f"Response too large: {content_length} bytes")
+
+        # Log successful response details
+        logger.info(
+            "HTTP request completed successfully",
+            extra={
+                "component": "ckan_client",
+                "operation": f"HTTP_{method}",
+                "url": url,
+                "status_code": response.status_code,
+                "duration_ms": duration_ms,
+                "response_size_bytes": response_size,
+                "response_headers": sanitize_for_logging(response_headers, max_size=2000),
+            },
+        )
+        
+        # Log full response at DEBUG level
+        try:
+            response_data = response.json() if response_size < 10000 else {"truncated": True, "size": response_size}
+            logger.debug(
+                "Full HTTP response details",
+                extra={
+                    "component": "ckan_client",
+                    "operation": f"HTTP_{method}",
+                    "url": url,
+                    "response_data": sanitize_for_logging(response_data, max_size=10000),
+                },
+            )
+        except Exception:
+            # If response is not JSON, log as text (truncated)
+            response_text = response.text[:5000] if len(response.text) > 5000 else response.text
+            logger.debug(
+                "HTTP response (non-JSON)",
+                extra={
+                    "component": "ckan_client",
+                    "operation": f"HTTP_{method}",
+                    "url": url,
+                    "response_text_preview": response_text,
+                },
+            )
 
         return response
 
     except httpx.HTTPStatusError as e:
         duration_ms = (time.time() - start_time) * 1000
+        error_response_text = None
+        try:
+            error_response_text = e.response.text[:2000] if e.response.text else None
+        except Exception:
+            pass
+        
+        logger.error(
+            "HTTP request failed with status error",
+            extra={
+                "component": "ckan_client",
+                "operation": f"HTTP_{method}",
+                "url": url,
+                "status_code": e.response.status_code,
+                "duration_ms": duration_ms,
+                "error_response": error_response_text,
+                "response_headers": sanitize_for_logging(dict(e.response.headers), max_size=1000),
+            },
+        )
         log_api_call(
-            get_logger("ckan"),
+            logger,
             f"HTTP_{method}",
             url,
             duration_ms,
             status_code=e.response.status_code,
             error_code="HTTP_ERROR",
+            error_response_preview=error_response_text,
         )
         raise
 
     except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError) as e:
         duration_ms = (time.time() - start_time) * 1000
+        logger.error(
+            "HTTP request failed with network error",
+            extra={
+                "component": "ckan_client",
+                "operation": f"HTTP_{method}",
+                "url": url,
+                "duration_ms": duration_ms,
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+            },
+            exc_info=True,
+        )
         log_api_call(
-            get_logger("ckan"),
+            logger,
             f"HTTP_{method}",
             url,
             duration_ms,
             error_code="NETWORK_ERROR",
+            error_type=type(e).__name__,
+            error_message=str(e),
         )
         raise
 
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
+        logger.error(
+            "HTTP request failed with unknown error",
+            extra={
+                "component": "ckan_client",
+                "operation": f"HTTP_{method}",
+                "url": url,
+                "duration_ms": duration_ms,
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+            },
+            exc_info=True,
+        )
         log_api_call(
-            get_logger("ckan"),
+            logger,
             f"HTTP_{method}",
             url,
             duration_ms,
             error_code="UNKNOWN_ERROR",
+            error_type=type(e).__name__,
+            error_message=str(e),
         )
         raise
 
@@ -284,21 +401,103 @@ async def _ckan_api_call_internal(
 
         result = data.get("result", {})
 
-        # Log successful API call
+        # Log successful API call with full details
         duration_ms = (time.time() - start_time) * 1000
+        result_size = len(str(result).encode("utf-8"))
+        
+        logger.info(
+            "CKAN API call completed successfully",
+            extra={
+                "component": "ckan_client",
+                "operation": f"ckan_{action}",
+                "url": url,
+                "action": action,
+                "method": method,
+                "status_code": response.status_code,
+                "duration_ms": duration_ms,
+                "result_size_bytes": result_size,
+                "params": sanitize_for_logging(params, max_size=2000),
+                "client_id": client_id,
+            },
+        )
+        
+        # Log full result at DEBUG level
+        logger.debug(
+            "Full CKAN API response result",
+            extra={
+                "component": "ckan_client",
+                "operation": f"ckan_{action}",
+                "action": action,
+                "result": sanitize_for_logging(result, max_size=10000),
+            },
+        )
+        
         log_api_call(
-            logger, f"ckan_{action}", url, duration_ms, status_code=response.status_code
+            logger,
+            f"ckan_{action}",
+            url,
+            duration_ms,
+            status_code=response.status_code,
+            action=action,
+            method=method,
+            result_size_bytes=result_size,
+            client_id=client_id,
         )
 
         return result
 
     except httpx.TimeoutException as e:
         duration_ms = (time.time() - start_time) * 1000
-        log_api_call(logger, f"ckan_{action}", url, duration_ms, error_code="TIMEOUT")
+        logger.error(
+            "CKAN API call timed out",
+            extra={
+                "component": "ckan_client",
+                "operation": f"ckan_{action}",
+                "url": url,
+                "action": action,
+                "method": method,
+                "duration_ms": duration_ms,
+                "timeout_seconds": settings.api_timeout,
+                "params": sanitize_for_logging(params, max_size=2000),
+                "client_id": client_id,
+            },
+        )
+        log_api_call(
+            logger,
+            f"ckan_{action}",
+            url,
+            duration_ms,
+            error_code="TIMEOUT",
+            action=action,
+            method=method,
+            timeout_seconds=settings.api_timeout,
+        )
         raise TimeoutError(f"Request timed out after {settings.api_timeout}s")
 
     except httpx.HTTPStatusError as e:
         duration_ms = (time.time() - start_time) * 1000
+        error_response_text = None
+        try:
+            error_response_text = e.response.text[:2000] if e.response.text else None
+        except Exception:
+            pass
+        
+        logger.error(
+            "CKAN API call failed with HTTP error",
+            extra={
+                "component": "ckan_client",
+                "operation": f"ckan_{action}",
+                "url": url,
+                "action": action,
+                "method": method,
+                "status_code": e.response.status_code,
+                "duration_ms": duration_ms,
+                "error_response": error_response_text,
+                "params": sanitize_for_logging(params, max_size=2000),
+                "client_id": client_id,
+                "response_headers": sanitize_for_logging(dict(e.response.headers), max_size=1000),
+            },
+        )
         log_api_call(
             logger,
             f"ckan_{action}",
@@ -306,6 +505,9 @@ async def _ckan_api_call_internal(
             duration_ms,
             status_code=e.response.status_code,
             error_code="HTTP_ERROR",
+            action=action,
+            method=method,
+            error_response_preview=error_response_text,
         )
 
         if e.response.status_code == 404:
@@ -317,8 +519,32 @@ async def _ckan_api_call_internal(
 
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
+        logger.error(
+            "CKAN API call failed with unknown error",
+            extra={
+                "component": "ckan_client",
+                "operation": f"ckan_{action}",
+                "url": url,
+                "action": action,
+                "method": method,
+                "duration_ms": duration_ms,
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "params": sanitize_for_logging(params, max_size=2000),
+                "client_id": client_id,
+            },
+            exc_info=True,
+        )
         log_api_call(
-            logger, f"ckan_{action}", url, duration_ms, error_code="UNKNOWN_ERROR"
+            logger,
+            f"ckan_{action}",
+            url,
+            duration_ms,
+            error_code="UNKNOWN_ERROR",
+            action=action,
+            method=method,
+            error_type=type(e).__name__,
+            error_message=str(e),
         )
         raise APIError(f"Unexpected error: {str(e)}")
 

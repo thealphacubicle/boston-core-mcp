@@ -215,7 +215,8 @@ The Lambda version reuses several components from the stdio server:
 ## Deployment to AWS Lambda
 
 For detailed deployment instructions using Terraform, see:
-- [Terraform Deployment Guide](../servers/boston_opendata_lambda/terraform/README.md)
+
+- [Terraform Deployment Guide](TERRAFORM_DEPLOYMENT.md)
 - [AWS Permissions Required](../servers/boston_opendata_lambda/terraform/AWS_PERMISSIONS.md)
 
 ### Quick Deployment Overview
@@ -223,23 +224,23 @@ For detailed deployment instructions using Terraform, see:
 1. **Build Docker Image**:
 
    **For Mac M1 (ARM64) - Recommended:**
-   
+
    ```bash
    cd servers/boston_opendata_lambda
    ./build.sh
    ```
-   
+
    This will build an ARM64 image (faster on M1 Macs). AWS Lambda supports ARM64 (Graviton2), so this works perfectly.
-   
+
    **For AMD64 (Standard Lambda):**
-   
+
    ```bash
    cd servers/boston_opendata_lambda
    PLATFORM=linux/amd64 ./build.sh
    ```
-   
+
    **Manual build:**
-   
+
    ```bash
    # From project root
    docker build --platform=linux/arm64 -t boston-opendata-mcp -f servers/boston_opendata_lambda/Dockerfile .
@@ -341,4 +342,3 @@ export BOSTON_OPENDATA_DEBUG=true
 - [ ] Support for multiple CKAN instances
 - [ ] Caching layer for frequently accessed data
 - [ ] Rate limiting per user/IP
-

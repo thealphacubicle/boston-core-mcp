@@ -3,3 +3,4 @@
 .idea/.gitignore
 *.pyc
 *.xml
+.vscode

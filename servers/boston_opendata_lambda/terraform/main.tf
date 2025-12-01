@@ -11,6 +11,13 @@ terraform {
       version = "~> 3.0"
     }
   }
+
+  backend "s3" {
+    # bucket is passed via -backend-config during terraform init
+    # bucket = "boston-mcp-tf-state-prod" or "boston-mcp-tf-state-dev"
+    key    = "terraform.tfstate"
+    region = "us-east-1"
+  }
 }
 
 provider "aws" {
@@ -71,6 +78,7 @@ resource "null_resource" "docker_build_and_push" {
   triggers = {
     dockerfile_hash     = filemd5("${path.module}/../Dockerfile")
     lambda_server_hash  = filemd5("${path.module}/../lambda_server.py")
+    logger_hash         = filemd5("${path.module}/../utils/logger.py")
     requirements_hash   = filemd5("${path.module}/../../../requirements.txt")
     repository_url      = aws_ecr_repository.boston_opendata_mcp.repository_url
     architecture        = var.lambda_architecture

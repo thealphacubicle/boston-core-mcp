@@ -253,3 +253,231 @@ def validate_pagination_params(
 
     return limit, offset
 
+
+def _fuzzy_match_field(
+    field_name: str, valid_fields: List[str], threshold: float = 0.7
+) -> Optional[str]:
+    """Find the best matching field name using simple string similarity.
+
+    Uses a simple ratio-based similarity (common characters / max length).
+    This is a lightweight alternative to libraries like fuzzywuzzy.
+
+    Args:
+        field_name: The field name to match
+        valid_fields: List of valid field names
+        threshold: Minimum similarity ratio (0.0 to 1.0) to consider a match
+
+    Returns:
+        Best matching field name if similarity >= threshold, None otherwise
+    """
+    field_name_lower = field_name.lower()
+    best_match = None
+    best_score = 0.0
+
+    for valid_field in valid_fields:
+        valid_lower = valid_field.lower()
+
+        # Exact match (case-insensitive)
+        if field_name_lower == valid_lower:
+            return valid_field
+
+        # Calculate simple similarity ratio
+        # Count common characters (case-insensitive)
+        common_chars = sum(
+            1 for c in field_name_lower if c in valid_lower
+        ) + sum(1 for c in valid_lower if c in field_name_lower)
+        max_len = max(len(field_name_lower), len(valid_lower))
+        score = common_chars / (max_len * 2) if max_len > 0 else 0.0
+
+        # Bonus for substring matches
+        if field_name_lower in valid_lower or valid_lower in field_name_lower:
+            score += 0.2
+
+        if score > best_score:
+            best_score = score
+            best_match = valid_field
+
+    return best_match if best_score >= threshold else None
+
+
+def validate_and_correct_field_names(
+    field_names: List[str],
+    valid_fields: List[str],
+    context: str = "field",
+) -> tuple[List[str], List[str], Dict[str, str]]:
+    """Validate field names against a schema and suggest corrections.
+
+    Args:
+        field_names: List of field names to validate
+        valid_fields: List of valid field names from the schema
+        context: Context string for error messages (e.g., "filter", "sort", "fields")
+
+    Returns:
+        Tuple of (corrected_field_names, invalid_fields, corrections_made)
+        - corrected_field_names: List with invalid fields replaced by corrections
+        - invalid_fields: List of field names that couldn't be corrected
+        - corrections_made: Dict mapping original -> corrected field names
+    """
+    if not valid_fields:
+        return field_names, field_names, {}
+
+    valid_field_set = set(valid_fields)
+    corrected = []
+    invalid = []
+    corrections = {}
+
+    for field in field_names:
+        if field in valid_field_set:
+            # Field is valid, use as-is
+            corrected.append(field)
+        else:
+            # Try to find a fuzzy match
+            match = _fuzzy_match_field(field, valid_fields)
+            if match:
+                corrected.append(match)
+                corrections[field] = match
+            else:
+                corrected.append(field)  # Keep original for error reporting
+                invalid.append(field)
+
+    return corrected, invalid, corrections
+
+
+def validate_filter_value(value: Any, field_name: str) -> tuple[bool, Optional[str]]:
+    """Validate that a filter value is in a supported format.
+
+    CKAN datastore_search only supports exact match filters (field = value).
+    It does NOT support MongoDB-style operators like $gte, $lte, $gt, $lt, etc.
+
+    Args:
+        value: The filter value to validate
+        field_name: The field name for error messages
+
+    Returns:
+        Tuple of (is_valid, error_message)
+        - is_valid: True if the value format is supported
+        - error_message: Error message if invalid, None if valid
+    """
+    # Check for MongoDB-style operators (not supported by CKAN datastore_search)
+    if isinstance(value, dict):
+        # Check for any MongoDB-style operators
+        unsupported_ops = []
+        for key in value.keys():
+            if isinstance(key, str) and key.startswith("$"):
+                unsupported_ops.append(key)
+
+        if unsupported_ops:
+            ops_list = ", ".join(sorted(unsupported_ops))
+            return (
+                False,
+                f"Unsupported filter operators for field '{field_name}': {ops_list}. "
+                f"CKAN datastore_search only supports exact match filters (field = value). "
+                f"For date ranges, you may need to use multiple exact value filters or "
+                f"query the data and filter client-side.",
+            )
+
+    # Check for nested dictionaries (not supported)
+    if isinstance(value, dict):
+        # Check if it's a nested structure (not just a simple dict)
+        for v in value.values():
+            if isinstance(v, (dict, list)):
+                return (
+                    False,
+                    f"Complex nested filter structures are not supported for field '{field_name}'. "
+                    f"CKAN datastore_search only supports simple exact match filters.",
+                )
+
+    # Check for lists (might be supported for "IN" queries, but verify)
+    if isinstance(value, list) and len(value) == 0:
+        return (
+            False,
+            f"Empty list filter value for field '{field_name}' is not supported.",
+        )
+
+    return True, None
+
+
+def validate_datastore_query_fields(
+    filters: Optional[Dict[str, Any]],
+    sort: Optional[str],
+    fields: Optional[List[str]],
+    valid_fields: List[str],
+) -> tuple[Optional[Dict[str, Any]], Optional[str], Optional[List[str]], Dict[str, str], List[str], List[str]]:
+    """Validate and correct field names in datastore query parameters.
+
+    Args:
+        filters: Filter dictionary with field names as keys
+        sort: Sort string in format "field_name asc/desc"
+        fields: List of field names to return
+        valid_fields: List of valid field names from the schema
+
+    Returns:
+        Tuple of (corrected_filters, corrected_sort, corrected_fields, corrections, errors, filter_errors)
+        - corrected_filters: Filters with corrected field names
+        - corrected_sort: Sort string with corrected field name
+        - corrected_fields: Fields list with corrected field names
+        - corrections: Dict mapping original -> corrected field names
+        - errors: List of field names that couldn't be corrected
+        - filter_errors: List of filter format errors (unsupported operators, etc.)
+    """
+    corrections = {}
+    errors = []
+    filter_errors = []
+
+    # Validate and correct filter field names
+    corrected_filters = None
+    if filters:
+        corrected_filters = {}
+        for field_name, value in filters.items():
+            # First validate the filter value format
+            is_valid_format, format_error = validate_filter_value(value, field_name)
+            if not is_valid_format:
+                filter_errors.append(format_error)
+                # Don't add to corrected_filters if format is invalid
+                continue
+
+            # Then validate/correct the field name
+            if field_name in valid_fields:
+                corrected_filters[field_name] = value
+            else:
+                match = _fuzzy_match_field(field_name, valid_fields)
+                if match:
+                    corrected_filters[match] = value
+                    corrections[field_name] = match
+                else:
+                    corrected_filters[field_name] = value  # Keep for error reporting
+                    errors.append(f"filter field '{field_name}'")
+
+    # Validate and correct sort field name
+    corrected_sort = None
+    if sort:
+        # Parse sort string: "field_name asc" or "field_name desc"
+        parts = sort.strip().split()
+        if len(parts) >= 2:
+            field_name = parts[0]
+            direction = " ".join(parts[1:])  # Preserve "asc" or "desc"
+            if field_name in valid_fields:
+                corrected_sort = f"{field_name} {direction}"
+            else:
+                match = _fuzzy_match_field(field_name, valid_fields)
+                if match:
+                    corrected_sort = f"{match} {direction}"
+                    corrections[field_name] = match
+                else:
+                    corrected_sort = sort  # Keep for error reporting
+                    errors.append(f"sort field '{field_name}'")
+        else:
+            corrected_sort = sort
+
+    # Validate and correct fields list
+    corrected_fields = None
+    if fields:
+        corrected_fields_list, invalid_fields, field_corrections = validate_and_correct_field_names(
+            fields, valid_fields, "fields"
+        )
+        corrected_fields = corrected_fields_list
+        corrections.update(field_corrections)
+        errors.extend([f"field '{f}'" for f in invalid_fields])
+
+    return corrected_filters, corrected_sort, corrected_fields, corrections, errors, filter_errors
+
