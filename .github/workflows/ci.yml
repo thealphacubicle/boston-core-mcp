@@ -87,6 +87,10 @@ jobs:
     needs: [terraform-validate, determine-environment]
     if: github.event_name == 'pull_request'
     environment: ${{ needs.determine-environment.outputs.env }}
+    env:
+      TF_VAR_ecr_repository_name: ${{ vars.TF_VAR_ECR_REPOSITORY_NAME }}
+      TF_VAR_lambda_function_name: ${{ vars.TF_VAR_LAMBDA_FUNCTION_NAME }}
+      TF_VAR_tags: ${{ vars.TF_VAR_TAGS }}
     permissions:
       contents: read
       pull-requests: write

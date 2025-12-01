@@ -83,6 +83,10 @@ jobs:
     needs: [lint-validate, determine-environment]
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     environment: ${{ needs.determine-environment.outputs.env }}
+    env:
+      TF_VAR_ecr_repository_name: ${{ vars.TF_VAR_ECR_REPOSITORY_NAME }}
+      TF_VAR_lambda_function_name: ${{ vars.TF_VAR_LAMBDA_FUNCTION_NAME }}
+      TF_VAR_tags: ${{ vars.TF_VAR_TAGS }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -122,6 +126,10 @@ jobs:
     needs: [terraform-plan, determine-environment]
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     environment: ${{ needs.determine-environment.outputs.env }}
+    env:
+      TF_VAR_ecr_repository_name: ${{ vars.TF_VAR_ECR_REPOSITORY_NAME }}
+      TF_VAR_lambda_function_name: ${{ vars.TF_VAR_LAMBDA_FUNCTION_NAME }}
+      TF_VAR_tags: ${{ vars.TF_VAR_TAGS }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
