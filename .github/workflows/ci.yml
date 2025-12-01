@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       env: ${{ steps.set-env.outputs.env }}
+      state-bucket: ${{ steps.set-env.outputs.state-bucket }}
     steps:
       - id: set-env
         run: |
@@ -27,8 +28,10 @@ jobs:
           fi
           if [ "$BRANCH" == "main" ]; then
             echo "env=production" >> $GITHUB_OUTPUT
+            echo "state-bucket=boston-mcp-tf-state-prod" >> $GITHUB_OUTPUT
           else
             echo "env=development" >> $GITHUB_OUTPUT
+            echo "state-bucket=boston-mcp-tf-state-dev" >> $GITHUB_OUTPUT
           fi
 
   code-quality:
@@ -107,7 +110,7 @@ jobs:
       - name: Terraform Init
         working-directory: servers/boston_opendata_lambda/terraform
         run: |
-          terraform init
+          terraform init -backend-config="bucket=${{ needs.determine-environment.outputs.state-bucket }}"
 
       - name: Terraform Plan
         id: plan

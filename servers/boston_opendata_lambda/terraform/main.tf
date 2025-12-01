@@ -13,7 +13,8 @@ terraform {
   }
 
   backend "s3" {
-    bucket = "boston-mcp-tf-state-prod"
+    # bucket is passed via -backend-config during terraform init
+    # bucket = "boston-mcp-tf-state-prod" or "boston-mcp-tf-state-dev"
     key    = "terraform.tfstate"
     region = "us-east-1"
   }
