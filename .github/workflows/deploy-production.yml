@@ -147,12 +147,6 @@ jobs:
           terraform_version: "1.0.0"
           terraform_wrapper: false
 
-      - name: Download Terraform Plan
-        uses: actions/download-artifact@v4
-        with:
-          name: tfplan
-          path: servers/boston_opendata_lambda/terraform
-
       - name: Terraform Init
         working-directory: servers/boston_opendata_lambda/terraform
         run: |
@@ -161,7 +155,7 @@ jobs:
       - name: Terraform Apply
         working-directory: servers/boston_opendata_lambda/terraform
         run: |
-          terraform apply -auto-approve tfplan
+          terraform apply -auto-approve
 
       - name: Get Terraform Outputs
         id: terraform-outputs
