@@ -140,6 +140,10 @@ This project is maintained by the City of Boston Department of Innovation and Te
 - **Model Context Protocol**: [modelcontextprotocol.io](https://modelcontextprotocol.io)
 - **MCPEngine**: [Featureform MCPEngine](https://www.featureform.com/post/deploy-mcp-on-aws-lambda-with-mcpengine)
 
+## Authors
+
+Srihari Raman & Pradhu Balamurugan
+
 ---
 
 **Built with ❤️ by the City of Boston DoIT team**
