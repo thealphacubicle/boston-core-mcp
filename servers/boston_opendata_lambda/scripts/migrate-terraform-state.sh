@@ -6,6 +6,7 @@
 set -e
 
 TERRAFORM_DIR="servers/boston_opendata_lambda/terraform"
+
 BUCKET_NAME="boston-mcp-tf-state-dev"
 STATE_KEY="terraform.tfstate"
 
