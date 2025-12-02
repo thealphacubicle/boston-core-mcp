@@ -180,13 +180,7 @@ jobs:
           echo "Initializing Terraform with backend state from S3..."
           terraform init -backend-config="bucket=${{ needs.determine-environment.outputs.state-bucket }}"
           echo "✅ Successfully initialized with backend state"
-
-      - name: Refresh Terraform State
-        working-directory: servers/boston_opendata_lambda/terraform
-        run: |
-          echo "Refreshing Terraform state to get latest from S3..."
-          terraform refresh -no-color || echo "⚠️ State refresh completed with warnings"
-          echo "✅ State refreshed successfully"
+          echo "ℹ️ Note: State was already refreshed in terraform-plan job, skipping refresh here to avoid stale plan error"
 
       - name: Terraform Validate (with backend state)
         working-directory: servers/boston_opendata_lambda/terraform
