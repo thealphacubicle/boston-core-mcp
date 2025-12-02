@@ -1,6 +1,6 @@
-# Boston OpenData MCP Server - Lambda Version
+# Boston OpenData MCP Server - Lambda Deployment Guide
 
-This is a Lambda-compatible version of the Boston OpenData MCP server using MCPEngine for production deployment on AWS Lambda.
+This guide covers deploying and developing with the Lambda-compatible version of the Boston OpenData MCP server using MCPEngine for production deployment on AWS Lambda.
 
 ## Overview
 
@@ -33,9 +33,17 @@ This server provides the same functionality as the stdio version but is designed
 | Authentication  | None                  | Optional (future)      |
 | Monitoring      | Custom logging        | MCPEngine + CloudWatch |
 
-## Quick Start
+## Production Deployment
 
-Get the server running in just a few steps:
+The server is currently deployed at:
+
+```
+https://kdbjj7ebdewlcy24bt4wbf3uju0tjgdf.lambda-url.us-east-1.on.aws
+```
+
+To connect to the deployed server, see [LAMBDA_QUICKSTART.md](./LAMBDA_QUICKSTART.md).
+
+## Local Development
 
 ### Prerequisites
 
@@ -47,10 +55,10 @@ Get the server running in just a few steps:
 
 2. Install MCPEngine CLI:
    ```bash
-   pip install mcpengine[cli,lambda]
+   pip install mcpengine
    ```
 
-### Running the Server (Step-by-Step)
+### Running the Server Locally (Step-by-Step)
 
 **Step 1:** Start the HTTP server in your first terminal:
 
@@ -73,7 +81,7 @@ The server is now running on `http://localhost:8000`.
 **Step 2:** In a **second terminal**, start the MCPEngine proxy:
 
 ```bash
-mcpengine proxy boston-opendata-lambda http://localhost:8000 --mode http --claude
+mcpengine proxy boston-opendata-lambda http://localhost:8000/mcp --mode http --claude
 ```
 
 This connects the MCP server to Claude Desktop.
@@ -105,7 +113,7 @@ This is the main workflow for testing with Claude Desktop:
 2. In another terminal, start the proxy:
 
    ```bash
-   mcpengine proxy boston-opendata-lambda http://localhost:8000 --mode http --claude
+   mcpengine proxy boston-opendata-lambda http://localhost:8000/mcp --mode http --claude
    ```
 
 3. Use Claude Desktop to test the tools
@@ -115,21 +123,50 @@ This is the main workflow for testing with Claude Desktop:
 Run the test script to verify tools work correctly:
 
 ```bash
-python servers/boston_opendata_lambda/test_local.py
+python servers/boston_opendata_lambda/tests/test_local.py
 ```
 
 ### Method 3: Direct HTTP Testing
 
-You can also test the server directly via HTTP:
+You can also test the server directly via HTTP using MCP protocol:
 
 ```bash
-# Test health check
-curl http://localhost:8000/health
-
-# Test tool execution (this would need to be adapted based on MCPEngine's HTTP API)
-curl -X POST http://localhost:8000/tools/search_datasets \
+# Initialize the MCP session
+curl -X POST http://localhost:8000/mcp \
   -H "Content-Type: application/json" \
-  -d '{"query": "311", "limit": 5}'
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": {},
+      "clientInfo": {"name": "test-client", "version": "1.0.0"}
+    }
+  }'
+
+# List available tools
+curl -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/list",
+    "params": {}
+  }'
+
+# Call a tool
+curl -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+      "name": "search_datasets",
+      "arguments": {"query": "311", "limit": 5}
+    }
+  }'
 ```
 
 ## Environment Variables
@@ -173,31 +210,37 @@ The Lambda version reuses several components from the stdio server:
 - **Context Management**: HTTP client lifecycle via `app_lifespan()`
 - **Error Handling**: Returns formatted error strings instead of TextContent
 - **Lambda Handler**: Generated via `engine.get_lambda_handler()`
+- **Endpoint**: MCP protocol messages are served at `/mcp` path
 
-## Deployment (Future)
+## Deployment to AWS Lambda
 
-When ready for AWS deployment:
+For detailed deployment instructions using Terraform, see:
+
+- [Terraform Deployment Guide](TERRAFORM_DEPLOYMENT.md)
+- [AWS Permissions Required](../servers/boston_opendata_lambda/terraform/AWS_PERMISSIONS.md)
+
+### Quick Deployment Overview
 
 1. **Build Docker Image**:
 
    **For Mac M1 (ARM64) - Recommended:**
-   
+
    ```bash
    cd servers/boston_opendata_lambda
    ./build.sh
    ```
-   
+
    This will build an ARM64 image (faster on M1 Macs). AWS Lambda supports ARM64 (Graviton2), so this works perfectly.
-   
+
    **For AMD64 (Standard Lambda):**
-   
+
    ```bash
    cd servers/boston_opendata_lambda
    PLATFORM=linux/amd64 ./build.sh
    ```
-   
+
    **Manual build:**
-   
+
    ```bash
    # From project root
    docker build --platform=linux/arm64 -t boston-opendata-mcp -f servers/boston_opendata_lambda/Dockerfile .
@@ -231,16 +274,18 @@ When ready for AWS deployment:
 
 ### Adding New Tools
 
-1. Add the tool function with `@engine.tool()` decorator
+1. Add the tool function with `@engine.tool()` decorator in `lambda_server.py`
 2. Include proper docstring for LLM tool selection
 3. Return formatted string (not TextContent)
 4. Handle errors with try/except and return error strings
+5. Tools are automatically discovered via `tools/list` endpoint - no manual registration needed!
 
 ### Testing Changes
 
-1. Run local tests: `python test_local.py`
-2. Test with MCPEngine proxy
+1. Run local tests: `python servers/boston_opendata_lambda/tests/test_local.py`
+2. Test with MCPEngine proxy locally
 3. Verify tool outputs match expected format
+4. Test dynamic tool discovery works correctly
 
 ## Troubleshooting
 
@@ -255,8 +300,8 @@ When ready for AWS deployment:
 2. **Proxy connection fails**:
 
    - Make sure the server is running on port 8000 before starting the proxy
-   - Check that `http://localhost:8000` is accessible
-   - Verify MCPEngine CLI is installed: `pip install mcpengine[cli,lambda]`
+   - Check that `http://localhost:8000/mcp` is accessible (note the `/mcp` path)
+   - Verify MCPEngine CLI is installed: `pip install mcpengine`
 
 3. **Tools not appearing in Claude Desktop**:
 
@@ -264,9 +309,14 @@ When ready for AWS deployment:
    - Restart Claude Desktop after starting the proxy
    - Check the server terminal for error messages
 
-4. **Connection Issues**: Check CKAN API availability
-5. **Tool Not Found**: Verify tool registration and docstring format
-6. **Timeout Errors**: Adjust timeout settings in config
+4. **404 errors when calling endpoints**:
+
+   - Make sure you're using the `/mcp` path in your requests
+   - Example: `http://localhost:8000/mcp` not `http://localhost:8000/`
+
+5. **Connection Issues**: Check CKAN API availability
+6. **Tool Not Found**: Verify tool registration and docstring format
+7. **Timeout Errors**: Adjust timeout settings in config
 
 ### Stopping the Servers
 
@@ -288,7 +338,6 @@ export BOSTON_OPENDATA_DEBUG=true
 ## Future Enhancements
 
 - [ ] Add authentication support (OIDC/Google SSO)
-- [ ] Implement CDK/Terraform for infrastructure
 - [ ] Add monitoring and alerting
 - [ ] Support for multiple CKAN instances
 - [ ] Caching layer for frequently accessed data

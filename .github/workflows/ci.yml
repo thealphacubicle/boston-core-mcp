@@ -13,6 +13,27 @@ on:
       - 'feature/*'
 
 jobs:
+  determine-environment:
+    runs-on: ubuntu-latest
+    outputs:
+      env: ${{ steps.set-env.outputs.env }}
+      state-bucket: ${{ steps.set-env.outputs.state-bucket }}
+    steps:
+      - id: set-env
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            BRANCH="${{ github.event.pull_request.base.ref }}"
+          else
+            BRANCH="${{ github.ref_name }}"
+          fi
+          if [ "$BRANCH" == "main" ]; then
+            echo "env=production" >> $GITHUB_OUTPUT
+            echo "state-bucket=boston-mcp-tf-state-prod" >> $GITHUB_OUTPUT
+          else
+            echo "env=development" >> $GITHUB_OUTPUT
+            echo "state-bucket=boston-mcp-tf-state-dev" >> $GITHUB_OUTPUT
+          fi
+
   code-quality:
     runs-on: ubuntu-latest
     steps:
@@ -49,6 +70,7 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: '1.0.0'
+          terraform_wrapper: false
 
       - name: Terraform Init
         working-directory: servers/boston_opendata_lambda/terraform
@@ -60,3 +82,82 @@ jobs:
         run: |
           terraform validate
 
+  terraform-plan:
+    runs-on: ubuntu-latest
+    needs: [terraform-validate, determine-environment]
+    if: github.event_name == 'pull_request'
+    environment: ${{ needs.determine-environment.outputs.env }}
+    env:
+      TF_VAR_ecr_repository_name: ${{ vars.TF_VAR_ECR_REPOSITORY_NAME }}
+      TF_VAR_lambda_function_name: ${{ vars.TF_VAR_LAMBDA_FUNCTION_NAME }}
+      TF_VAR_tags: ${{ vars.TF_VAR_TAGS }}
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.0.0'
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: servers/boston_opendata_lambda/terraform
+        run: |
+          terraform init -backend-config="bucket=${{ needs.determine-environment.outputs.state-bucket }}"
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: servers/boston_opendata_lambda/terraform
+        run: |
+          terraform plan -no-color -out=tfplan 2>&1 | tee plan_output.txt
+        continue-on-error: true
+
+      - name: Comment PR
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const planPath = path.join('servers/boston_opendata_lambda/terraform/plan_output.txt');
+            let planOutput = '';
+            
+            try {
+              planOutput = fs.readFileSync(planPath, 'utf8');
+            } catch (error) {
+              planOutput = 'Plan output file not found.';
+            }
+            
+            const planStatus = '${{ steps.plan.outcome }}' === 'success' ? '✅ **Plan succeeded**' : '❌ **Plan failed**';
+            
+            const output = `#### Terraform Plan 📖
+            ${planStatus}
+            
+            <details><summary>Show Plan</summary>
+            
+            \`\`\`terraform
+            ${planOutput}
+            \`\`\`
+            
+            </details>
+            
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
