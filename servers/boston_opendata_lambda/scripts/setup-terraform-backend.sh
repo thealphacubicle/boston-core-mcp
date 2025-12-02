@@ -6,7 +6,7 @@
 set -e  # Exit on error
 
 # Configuration
-BUCKET_NAME="boston-mcp-tf-state-prod"
+BUCKET_NAME="boston-mcp-tf-state-dev"
 REGION="us-east-1"
 MAX_RETRIES=5
 RETRY_DELAY=10  # seconds (increased initial delay)

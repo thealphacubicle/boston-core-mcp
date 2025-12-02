@@ -104,15 +104,33 @@ jobs:
           terraform_version: "1.0.0"
           terraform_wrapper: false
 
-      - name: Terraform Init
+      - name: Terraform Init (with backend state)
         working-directory: servers/boston_opendata_lambda/terraform
         run: |
+          echo "Initializing Terraform with backend state from S3..."
           terraform init -backend-config="bucket=${{ needs.determine-environment.outputs.state-bucket }}"
+          echo "✅ Successfully initialized with backend state"
+
+      - name: Refresh Terraform State
+        working-directory: servers/boston_opendata_lambda/terraform
+        run: |
+          echo "Refreshing Terraform state to get latest from S3..."
+          terraform refresh -no-color || echo "⚠️ State refresh completed with warnings"
+          echo "✅ State refreshed successfully"
+
+      - name: Terraform Validate (with backend state)
+        working-directory: servers/boston_opendata_lambda/terraform
+        run: |
+          echo "Validating Terraform configuration with backend state..."
+          terraform validate
+          echo "✅ Validation passed"
 
       - name: Terraform Plan
         working-directory: servers/boston_opendata_lambda/terraform
         run: |
+          echo "Generating Terraform execution plan..."
           terraform plan -no-color -out=tfplan
+          echo "✅ Plan generated successfully"
 
       - name: Upload Terraform Plan
         uses: actions/upload-artifact@v4
@@ -150,10 +168,32 @@ jobs:
           terraform_version: "1.0.0"
           terraform_wrapper: false
 
-      - name: Terraform Init
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: servers/boston_opendata_lambda/terraform/
+
+      - name: Terraform Init (with backend state)
         working-directory: servers/boston_opendata_lambda/terraform
         run: |
+          echo "Initializing Terraform with backend state from S3..."
           terraform init -backend-config="bucket=${{ needs.determine-environment.outputs.state-bucket }}"
+          echo "✅ Successfully initialized with backend state"
+
+      - name: Refresh Terraform State
+        working-directory: servers/boston_opendata_lambda/terraform
+        run: |
+          echo "Refreshing Terraform state to get latest from S3..."
+          terraform refresh -no-color || echo "⚠️ State refresh completed with warnings"
+          echo "✅ State refreshed successfully"
+
+      - name: Terraform Validate (with backend state)
+        working-directory: servers/boston_opendata_lambda/terraform
+        run: |
+          echo "Validating Terraform configuration with backend state..."
+          terraform validate
+          echo "✅ Validation passed"
 
       - name: Import Existing Resources (if needed)
         working-directory: servers/boston_opendata_lambda/terraform
@@ -225,25 +265,32 @@ jobs:
           echo "Current Terraform state:"
           terraform state list || echo "No resources in state yet"
 
-      - name: Terraform Apply
+      - name: Terraform Apply (using plan file)
         working-directory: servers/boston_opendata_lambda/terraform
         run: |
-          # Try to apply, and if log group creation fails due to existing resource, import it
-          terraform apply -auto-approve 2>&1 | tee /tmp/apply_output.txt || {
-            APPLY_ERROR=$(cat /tmp/apply_output.txt 2>/dev/null || echo "")
-            if echo "$APPLY_ERROR" | grep -q "ResourceAlreadyExistsException.*log group"; then
-              echo "Log group already exists, attempting to import..."
-              LOG_GROUP="/aws/lambda/$TF_VAR_lambda_function_name"
-              terraform import aws_cloudwatch_log_group.lambda_logs "$LOG_GROUP" || {
-                echo "Import still failed, but log group exists. Continuing..."
-              }
-              echo "Retrying terraform apply..."
-              terraform apply -auto-approve
-            else
-              echo "Terraform apply failed: $APPLY_ERROR"
-              exit 1
-            fi
-          }
+          echo "Applying Terraform plan..."
+          if [ -f "tfplan" ]; then
+            echo "✅ Using plan file from terraform-plan job"
+            terraform apply -auto-approve tfplan
+          else
+            echo "⚠️ Plan file not found, running apply without plan file"
+            terraform apply -auto-approve 2>&1 | tee /tmp/apply_output.txt || {
+              APPLY_ERROR=$(cat /tmp/apply_output.txt 2>/dev/null || echo "")
+              if echo "$APPLY_ERROR" | grep -q "ResourceAlreadyExistsException.*log group"; then
+                echo "Log group already exists, attempting to import..."
+                LOG_GROUP="/aws/lambda/$TF_VAR_lambda_function_name"
+                terraform import aws_cloudwatch_log_group.lambda_logs "$LOG_GROUP" || {
+                  echo "Import still failed, but log group exists. Continuing..."
+                }
+                echo "Retrying terraform apply..."
+                terraform apply -auto-approve
+              else
+                echo "Terraform apply failed: $APPLY_ERROR"
+                exit 1
+              fi
+            }
+          fi
+          echo "✅ Terraform apply completed successfully"
 
       - name: Get Terraform Outputs
         id: terraform-outputs

@@ -6,7 +6,7 @@
 set -e
 
 TERRAFORM_DIR="servers/boston_opendata_lambda/terraform"
-BUCKET_NAME="boston-mcp-tf-state-prod"
+BUCKET_NAME="boston-mcp-tf-state-dev"
 STATE_KEY="terraform.tfstate"
 
 # Colors for output
@@ -32,12 +32,15 @@ print_step() {
     echo -e "${BLUE}[STEP]${NC} $1"
 }
 
-# Change to repository root (two levels up from servers/boston_opendata_lambda/)
+# Change to repository root (three levels up from scripts/ directory)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 cd "$REPO_ROOT"
 
 print_info "Terraform State Migration Guide"
+echo ""
+print_info "Repository root: $REPO_ROOT"
+print_info "Terraform directory: $TERRAFORM_DIR"
 echo ""
 
 # Check if Terraform is installed
@@ -49,6 +52,7 @@ fi
 # Check if we're in the right directory
 if [ ! -d "$TERRAFORM_DIR" ]; then
     print_error "Terraform directory not found: $TERRAFORM_DIR"
+    print_error "Current directory: $(pwd)"
     print_error "Please run this script from the repository root."
     exit 1
 fi
@@ -64,7 +68,7 @@ if [ -f "terraform.tfstate" ]; then
     echo ""
     print_info "You have a local state file. Here's what to do:"
     echo ""
-    echo "1. Run: terraform init"
+    echo "1. Run: terraform init -backend-config=\"bucket=$BUCKET_NAME\""
     echo "   Terraform will detect the backend change and ask:"
     echo "   'Do you want to copy existing state to the new backend?'"
     echo "   Answer: yes"
@@ -92,7 +96,7 @@ if aws s3 ls "s3://$BUCKET_NAME/$STATE_KEY" &>/dev/null; then
     print_info "S3 state file size: $STATE_SIZE"
     echo ""
     print_info "Your state is already in S3. You can proceed with:"
-    echo "  terraform init"
+    echo "  terraform init -backend-config=\"bucket=$BUCKET_NAME\""
     echo ""
     print_warning "If you have local changes, Terraform will ask if you want to migrate."
     print_warning "Only answer 'yes' if you want to overwrite the S3 state with your local state."
@@ -113,7 +117,7 @@ echo "1. Navigate to Terraform directory:"
 echo "   cd servers/boston_opendata_lambda/terraform"
 echo ""
 echo "2. Initialize Terraform (this will set up the S3 backend):"
-echo "   terraform init"
+echo "   terraform init -backend-config=\"bucket=$BUCKET_NAME\""
 echo ""
 echo "3. If prompted about migrating state, answer 'yes'"
 echo ""
