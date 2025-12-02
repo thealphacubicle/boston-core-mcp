@@ -209,18 +209,26 @@ jobs:
           echo "IAM Role: $IAM_ROLE"
           echo "Log Group: $LOG_GROUP"
 
-          # Import ECR repository if it exists
+          # Import ECR repository if it exists and not already in state
           if aws ecr describe-repositories --repository-names "$ECR_REPO" --region "$REGION" &>/dev/null; then
-            echo "ECR repository exists, attempting import..."
-            terraform import aws_ecr_repository.boston_opendata_mcp "$ECR_REPO" 2>&1 || echo "ECR repository already in state or import failed"
+            if terraform state show aws_ecr_repository.boston_opendata_mcp &>/dev/null; then
+              echo "ECR repository already in Terraform state, skipping import"
+            else
+              echo "ECR repository exists, attempting import..."
+              terraform import aws_ecr_repository.boston_opendata_mcp "$ECR_REPO" 2>&1 || echo "ECR repository import failed (may already be in state)"
+            fi
           else
             echo "ECR repository does not exist, skipping import"
           fi
 
-          # Import IAM role if it exists
+          # Import IAM role if it exists and not already in state
           if aws iam get-role --role-name "$IAM_ROLE" &>/dev/null; then
-            echo "IAM role exists, attempting import..."
-            terraform import aws_iam_role.lambda_execution "$IAM_ROLE" 2>&1 || echo "IAM role already in state or import failed"
+            if terraform state show aws_iam_role.lambda_execution &>/dev/null; then
+              echo "IAM role already in Terraform state, skipping import"
+            else
+              echo "IAM role exists, attempting import..."
+              terraform import aws_iam_role.lambda_execution "$IAM_ROLE" 2>&1 || echo "IAM role import failed (may already be in state)"
+            fi
           else
             echo "IAM role does not exist, skipping import"
           fi
@@ -251,13 +259,10 @@ jobs:
             echo "CloudWatch log group does not exist, skipping import"
           fi
 
-          # Refresh state after imports
-          echo "Refreshing Terraform state..."
-          terraform refresh -no-color || true
-
           # Show current state to verify imports
           echo "Current Terraform state:"
           terraform state list || echo "No resources in state yet"
+          echo "ℹ️ Note: Imports update state automatically. No refresh needed."
 
       - name: Terraform Apply (using plan file)
         working-directory: servers/boston_opendata_lambda/terraform
