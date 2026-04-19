@@ -1736,40 +1736,18 @@ async def perform_health_check() -> Dict[str, Any]:
 # ============================================================================
 
 if __name__ == "__main__":
-    # For local testing, use MCPEngine's built-in HTTP server
-    import uvicorn
+    import argparse
 
-    # Initialize logging for local development
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--stdio", action="store_true", help="Run in stdio mode for Claude Desktop")
+    args = parser.parse_args()
+
     setup_logging(level=settings.log_level, format_type=settings.log_format)
 
-    logger.info(
-        "Starting Boston OpenData MCP Server (Lambda version) for local testing",
-        extra={
-            "component": "server",
-            "mode": "local_development",
-            "environment": settings.environment,
-            "host": "0.0.0.0",
-            "port": 8000,
-        },
-    )
+    if args.stdio:
+        asyncio.run(engine.run_stdio_async())
+    else:
+        import uvicorn
 
-    logger.info(
-        "Server configuration",
-        extra={
-            "component": "server",
-            "server_url": "http://localhost:8000",
-            "proxy_command": "mcpengine proxy boston-opendata-lambda http://localhost:8000 --mode http --claude",
-        },
-    )
-
-    # Use MCPEngine's built-in HTTP app
-    # MCPEngine provides http_app() which returns a Starlette-compatible app
-    http_app = engine.http_app()
-
-    logger.info(
-        "HTTP app initialized, starting uvicorn server",
-        extra={"component": "server", "log_level": "info"},
-    )
-
-    # Start the server using uvicorn
-    uvicorn.run(http_app, host="0.0.0.0", port=8000, log_level="info")
+        http_app = engine.http_app()
+        uvicorn.run(http_app, host="0.0.0.0", port=8000, log_level="info")
